@@ -97,7 +97,17 @@
     containers = lib.mkForce {};
   };
 in {
+  # Core's own namespace (aliased by exports.nix as devenvModules.*)…
   flake.modules.devenv = {
     inherit rust python polyglot embedded-rust;
+  };
+
+  # …and the consumer's namespace via the exported flakeModule, so
+  # dendritic consumers see the same modules through both channels
+  # (agentic-layering spec).
+  flake.modules.flake.agentic = {
+    flake.modules.devenv = {
+      inherit rust python polyglot embedded-rust;
+    };
   };
 }
