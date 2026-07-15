@@ -103,6 +103,19 @@
           '';
         };
 
+        cliEquivalent = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = ''
+            CLI invocation providing the same function as this server,
+            for harnesses without core MCP support (Pi). Servers an
+            agent may need on EVERY harness (knowledge search at
+            minimum) must set this; it is surfaced in generated docs
+            and collected by `agentic.mcp.lib.cliEquivalents`. See
+            docs/harness-coverage.md.
+          '';
+        };
+
         _name = lib.mkOption {
           type = lib.types.str;
           default = name;
@@ -185,6 +198,13 @@
         acc: _: def:
           acc // def.secrets
       ) {} (lib.filterAttrs (_: s: s.type == "http") deliverable);
+
+      # Servers reachable without MCP (Pi coverage): name -> CLI
+      # invocation. Surfaced in generated docs so MCP-less harnesses
+      # know the equivalent path.
+      cliEquivalents =
+        lib.mapAttrs (_: s: s.cliEquivalent)
+        (lib.filterAttrs (_: s: s.cliEquivalent != null) cfg.servers);
 
       # Eval-time validation of agent-declared MCP requirements: an
       # undefined reference fails naming the agent and the server; a
