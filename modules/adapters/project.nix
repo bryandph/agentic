@@ -31,11 +31,11 @@
 
     config.perSystem = {pkgs, ...}: {
       mcp-servers = {
-        flavors =
-          lib.genAttrs config.agentic.mcp.projectFlavors (_: {enable = true;})
-          // lib.optionalAttrs (lib.elem "opencode" config.agentic.mcp.projectFlavors) {
-            opencode.settings."$schema" = "https://opencode.ai/config.json";
-          };
+        flavors = lib.genAttrs config.agentic.mcp.projectFlavors (flavor:
+          {enable = true;}
+          // lib.optionalAttrs (flavor == "opencode") {
+            settings."$schema" = "https://opencode.ai/config.json";
+          });
         settings.servers = config.agentic.mcp.lib.renderTier pkgs "project";
       };
     };
