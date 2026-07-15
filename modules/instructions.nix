@@ -159,25 +159,26 @@
         };
 
         # Drift check: committed files must equal the rendered projection.
-        checks.agent-instructions-drift = lib.mkIf cfg.driftCheck (
-          pkgs.runCommand "agent-instructions-drift" {
-            nativeBuildInputs = [pkgs.diffutils];
-          } ''
-            set -euo pipefail
-            status=0
-            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (path: _: ''
-                if [ ! -f ${cfg.selfPath}/${lib.escapeShellArg path} ]; then
-                  echo "MISSING: ${path} is not committed. Generate it with: nix run .#write-agent-instructions"
-                  status=1
-                elif ! diff -u ${cfg.selfPath}/${lib.escapeShellArg path} ${renderedDir}/${lib.escapeShellArg path}; then
-                  echo "DRIFT: ${path} differs from the rendered projection. Regenerate with: nix run .#write-agent-instructions"
-                  status=1
-                fi
-              '')
-              renderedFiles)}
-            [ "$status" = 0 ] && touch $out
-          ''
-        );
+        checks = lib.mkIf cfg.driftCheck {
+          agent-instructions-drift =
+            pkgs.runCommand "agent-instructions-drift" {
+              nativeBuildInputs = [pkgs.diffutils];
+            } ''
+              set -euo pipefail
+              status=0
+              ${lib.concatStringsSep "\n" (lib.mapAttrsToList (path: _: ''
+                  if [ ! -f ${cfg.selfPath}/${lib.escapeShellArg path} ]; then
+                    echo "MISSING: ${path} is not committed. Generate it with: nix run .#write-agent-instructions"
+                    status=1
+                  elif ! diff -u ${cfg.selfPath}/${lib.escapeShellArg path} ${renderedDir}/${lib.escapeShellArg path}; then
+                    echo "DRIFT: ${path} differs from the rendered projection. Regenerate with: nix run .#write-agent-instructions"
+                    status=1
+                  fi
+                '')
+                renderedFiles)}
+              [ "$status" = 0 ] && touch $out
+            '';
+        };
       };
     };
   };
