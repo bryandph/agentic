@@ -13,6 +13,17 @@
     # file (paths NOT containing `/_`) as a flake-parts module.
     import-tree.url = "github:denful/import-tree";
 
+    # Upstream MCP delivery planes (design D4): the flake-parts module
+    # renders per-flavor project configs (.mcp.json, opencode config) and
+    # the home-manager module bridges into `programs.mcp`. Core's
+    # adapters feed the registry into these — core maps schema, upstream
+    # owns file formats. Consumers lock this pin through their own
+    # flake.lock (follows-overridable).
+    mcp-servers-nix = {
+      url = "github:natsukium/mcp-servers-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
