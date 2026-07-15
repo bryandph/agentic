@@ -162,6 +162,41 @@
       }
       // lib.optionalAttrs (def.args != []) {inherit (def) args;}
       // lib.optionalAttrs (def.env != {}) {inherit (def) env;};
+
+  envHeader = value:
+    if builtins.isString value
+    then builtins.match ''\$[{]([A-Za-z_][A-Za-z0-9_]*)[}]'' value
+    else null;
+
+  bearerHeader = value:
+    if builtins.isString value
+    then builtins.match ''Bearer \$[{]([A-Za-z_][A-Za-z0-9_]*)[}]'' value
+    else null;
+
+  transformCodexServer = _: server: let
+    headers = server.headers or {};
+    bearerMatch =
+      if headers ? Authorization
+      then bearerHeader headers.Authorization
+      else null;
+    remainingHeaders =
+      if bearerMatch != null
+      then builtins.removeAttrs headers ["Authorization"]
+      else headers;
+    envHeaders = lib.filterAttrs (_: value: envHeader value != null) remainingHeaders;
+    staticHeaders = lib.filterAttrs (_: value: envHeader value == null) remainingHeaders;
+  in
+    lib.optionalAttrs ((server.command or null) != null) {inherit (server) command;}
+    // lib.optionalAttrs ((server.args or []) != []) {inherit (server) args;}
+    // lib.optionalAttrs ((server.env or {}) != {}) {inherit (server) env;}
+    // lib.optionalAttrs ((server.url or null) != null) {inherit (server) url;}
+    // lib.optionalAttrs (staticHeaders != {}) {http_headers = staticHeaders;}
+    // lib.optionalAttrs (envHeaders != {}) {
+      env_http_headers = lib.mapAttrs (_: value: builtins.elemAt (envHeader value) 0) envHeaders;
+    }
+    // lib.optionalAttrs (bearerMatch != null) {
+      bearer_token_env_var = builtins.elemAt bearerMatch 0;
+    };
 in {
   options.agentic.mcp = {
     servers = lib.mkOption {
@@ -175,7 +210,7 @@ in {
       readOnly = true;
       description = ''
         Registry helpers for delivery adapters and the agent registry:
-        `serversForTier`, `render`, `renderTier`, `httpSecretRefs`,
+        `serversForTier`, `render`, `renderTier`, `renderCodexTier`, `httpSecretRefs`,
         `validateAgentRefs`.
       '';
     };
@@ -190,6 +225,15 @@ in {
     renderTier = pkgs: tier:
       lib.mapAttrs (render pkgs)
       (lib.filterAttrs (_: s: lib.elem tier s.tiers) deliverable);
+
+    # Codex's TOML schema names HTTP header fields differently from the
+    # registry's Claude-shaped common representation. Keep that mapping in
+    # the adapter layer while preserving the single server definition set.
+    renderCodexTier = pkgs: tier:
+      lib.mapAttrs transformCodexServer (
+        lib.mapAttrs (render pkgs)
+        (lib.filterAttrs (_: s: lib.elem tier s.tiers) deliverable)
+      );
 
     # Secret requirements of http servers (any tier) — the set the
     # shell bootstrap must export for client-side header expansion.

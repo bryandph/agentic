@@ -22,10 +22,10 @@
       type = lib.types.listOf (lib.types.enum ["claude-code" "opencode" "vscode-workspace"]);
       default = ["claude-code" "opencode"];
       description = ''
-        Project-tier config flavors to render. Codex is deliberately
-        absent: its MCP configuration is user-tier TOML, delivered
-        through the home-manager plane (`programs.mcp` +
-        `programs.codex.enableMcpIntegration`).
+        Project-tier flavors rendered by the upstream flake-parts module.
+        Codex is placed separately by the transport-neutral bootstrap using
+        the upstream library's `codex` flavor because the upstream
+        flake-parts flavor list does not expose it.
       '';
     };
 

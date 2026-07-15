@@ -77,7 +77,10 @@
           };
 
           perSystem = {pkgs, ...}: {
-            packages.fixture-project-forge = pkgs.writeText "forge-rendered.json" (builtins.toJSON (config.agentic.mcp.lib.renderTier pkgs "project").forge);
+            packages = {
+              fixture-project-forge = pkgs.writeText "forge-rendered.json" (builtins.toJSON (config.agentic.mcp.lib.renderTier pkgs "project").forge);
+              fixture-codex-docs = pkgs.writeText "codex-docs-rendered.json" (builtins.toJSON (config.agentic.mcp.lib.renderCodexTier pkgs "project").docs);
+            };
           };
         })
       ];
@@ -108,6 +111,13 @@
         wrapper=$(jq -r .command "$rendered")
         grep -qF "vault kv get '-mount=fixture-kv' '-field=token' fixture/forge" "$wrapper"
         grep -qF 'export FORGE_TOKEN="$(' "$wrapper"
+
+        # Codex uses its native bearer-token field rather than carrying the
+        # registry's Claude-shaped Authorization header through unchanged.
+        codex_docs=${fixture.packages.${system}.fixture-codex-docs}
+        [ "$(jq -r .bearer_token_env_var "$codex_docs")" = DOCS_API_KEY ]
+        [ "$(jq -r .url "$codex_docs")" = "https://docs.fixture.example/mcp" ]
+        [ "$(jq -r 'has("headers") or has("type")' "$codex_docs")" = false ]
 
         touch $out
       '';
