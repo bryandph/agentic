@@ -54,12 +54,18 @@ No capability exists only on the native transport, so pin drift can
 never strand a consumer — it can only make the two transports disagree
 about which core they run, which the check above catches.
 
-## Known environmental issue (2026-07)
+## Known upstream issue (devenv ≤ 2.1.x)
 
-devenv 2.1.2's input fetcher fails on public https GitHub fetches with
-`authentication required but no callback set` **when the user's
-`~/.config/nix/nix.conf` carries `access-tokens`** — it decides to
-authenticate but has no libgit2 credential callback wired. Verified by
-reproduction: identical invocation succeeds under a HOME without that
-config. Until fixed upstream, either drop the access-tokens line for
-native-transport runs or invoke devenv with an isolated HOME.
+devenv 2.1.1–2.1.x's input fetcher can fail on public https GitHub
+fetches with `authentication required but no callback set`. This is
+cachix/devenv#2842 — a regression in devenv's embedded Nix fork's git
+fetcher (missing credential callback), introduced between 2.1.0 and
+2.1.1 and triggered by environment-dependent user configuration
+(upstream reports name gitconfig url rewrites and ssh configs; in our
+reproduction only the full real HOME triggered it — no single config
+file did). Fixed by cachix/nix@078bffe (upstreamed as NixOS/nix#15470),
+on devenv main, releasing in 2.2.
+
+Workarounds until 2.2 lands in nixpkgs: run the fixed build
+(`nix run github:cachix/devenv/main -- shell …`) or invoke devenv under
+an isolated HOME.
