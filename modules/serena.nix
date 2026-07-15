@@ -97,7 +97,7 @@
     };
 
     config = {
-      agentic.serena.lib = {inherit wrapperFor memoryContextFile memoryTools;};
+      agentic.serena.lib = {inherit wrapperFor memoryContextFile memoryTools serenaPackage;};
 
       agentic.mcp.servers.serena = {
         tiers = ["project"];

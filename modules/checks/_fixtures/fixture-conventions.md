@@ -1,2 +1,2 @@
 Fixture conventions card: prefer typed schemas over prose; validate at
-eval time. Deeper detail: `mem:fixture-conventions`.
+eval time. Deeper detail: `mem:knowledge/fixture-review`.
