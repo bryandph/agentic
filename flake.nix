@@ -24,6 +24,18 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Knowledge semantic search (design D11): local models, disposable
+    # out-of-repo index (~/.cache/qmd), MCP + CLI — the CLI matters
+    # because Pi has no core MCP support.
+    #
+    # Deliberately NOT following our nixpkgs: qmd's bun/node-gyp build
+    # (better-sqlite3 native rebuild) only works against the
+    # bun/node/node-gyp combination of its own pinned nixpkgs-unstable —
+    # under 26.05's toolchain, gyp fails on darwin ("No Xcode or CLT
+    # version detected"). Same deviation rationale as the Hyprland
+    # chain in nixspace: follows-dedup yields a broken build here.
+    qmd.url = "github:tobi/qmd";
+
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
