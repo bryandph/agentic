@@ -86,7 +86,9 @@
     p = fixture.agenticProbe;
   in {
     checks.mcp-registry = assert p.userTier == ["forge" "plain"];
-    assert p.projectTier == ["docs" "forge" "plain"];
+    # serena arrives from core's own module (task 2.5) — present in every
+    # consumer's project tier.
+    assert p.projectTier == ["docs" "forge" "plain" "serena"];
     assert p.httpSecretVars == ["DOCS_API_KEY"];
     assert p.validOk == ["forge"];
     assert p.externalOk == ["adhoc"];
