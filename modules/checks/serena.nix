@@ -45,7 +45,7 @@
         set -euo pipefail
 
         full=${fp "serena-full"}/bin/serena-full
-        memory=${fp "serena-memory"}/bin/serena-memory
+        memory=${fp "serena-memory"}/bin/serena-memory-only
         context=${fp "serena-context"}
 
         # Both shapes: pinned binary (store path, not nix run), project
