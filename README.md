@@ -52,3 +52,8 @@ consumes it; expect breaking changes between 0.x tags.
 
 Primary: `git.bph/bryan/agentic` (Gitea). A GitHub push mirror is the
 consumption channel for environments without access to the primary.
+Verified 2026-07-15: the mirror is `github:bryandph/agentic` (public) —
+`nix flake metadata github:bryandph/agentic` resolves and locks without
+credentials, so a second environment consumes core exactly like any
+public flake input (design Open Question 1 resolved: no work-side
+mirror needed).
