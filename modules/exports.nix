@@ -36,6 +36,9 @@
     devenvModules = {
       agentic = config.flake.modules.devenv.agentic;
       default = config.flake.modules.devenv.agentic;
+      # Org-neutral language profiles (D8) — composable alongside the
+      # agentic module; they never own a repo's packaging.
+      inherit (config.flake.modules.devenv) rust python polyglot embedded-rust;
     };
 
     homeModules = {
