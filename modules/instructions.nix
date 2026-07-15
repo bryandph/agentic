@@ -104,6 +104,16 @@
         description = "Committed source tree the drift check compares against.";
       };
 
+      driftCheck = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Enforce the committed-vs-rendered drift check. Disable ONLY
+          during a migration's additive phase, before the generated
+          files are first committed.
+        '';
+      };
+
       lib = lib.mkOption {
         type = lib.types.raw;
         readOnly = true;
@@ -149,7 +159,7 @@
         };
 
         # Drift check: committed files must equal the rendered projection.
-        checks.agent-instructions-drift =
+        checks.agent-instructions-drift = lib.mkIf cfg.driftCheck (
           pkgs.runCommand "agent-instructions-drift" {
             nativeBuildInputs = [pkgs.diffutils];
           } ''
@@ -166,7 +176,8 @@
               '')
               renderedFiles)}
             [ "$status" = 0 ] && touch $out
-          '';
+          ''
+        );
       };
     };
   };
