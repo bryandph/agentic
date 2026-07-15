@@ -6,14 +6,23 @@
 # never need import-tree or the modules namespace. Both channels expose
 # the same modules; dendritic consumers may merge `flake.modules.*`
 # directly instead.
-{config, ...}: {
-  # Seed the namespace with the (currently empty) core modules so the
-  # aliases below always resolve. Task groups 2-4 grow these: the MCP
-  # registry and agent/knowledge registry land in `flake.agentic`, the
-  # shell bootstrap in `devenv.agentic`, the user-tier delivery in
-  # `homeManager.agentic`.
+{
+  config,
+  inputs,
+  ...
+}: {
+  # Seed the namespace so the aliases below always resolve; the feature
+  # modules grow these: the MCP registry and agent/knowledge registry
+  # land in `flake.agentic`, the shell bootstrap in `devenv.agentic`,
+  # the user-tier delivery in `homeManager.agentic`.
   flake.modules = {
-    flake.agentic = {};
+    # The wired adapters publish into the CONSUMER's
+    # `flake.modules.<class>.*` namespace — the exported flakeModule
+    # therefore imports flake-parts' modules flakeModule so that
+    # namespace exists even for non-dendritic consumers (harmless for
+    # consumers that already import it, provided flake-parts is
+    # follows-deduped to one copy).
+    flake.agentic.imports = [inputs.flake-parts.flakeModules.modules];
     homeManager.agentic = {};
     devenv.agentic = {};
   };
