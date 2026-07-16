@@ -88,9 +88,11 @@
 
     p = fixture.agenticProbe;
   in {
-    checks.mcp-registry = assert p.userTier == ["forge" "plain"];
-    # serena and knowledge search arrive from core's own modules (tasks
-    # 2.5/2.5b) — present in every consumer's project tier.
+    # Serena arrives from core's own module and is deliberately in both
+    # tiers so Codex receives it through the user delivery plane.
+    checks.mcp-registry = assert p.userTier == ["forge" "plain" "serena"];
+    # Serena and knowledge search arrive from core's own modules (tasks
+    # 2.5/2.5b); both are present in the project tier as well.
     assert p.projectTier == ["docs" "forge" "knowledge" "plain" "serena"];
     assert p.httpSecretVars == ["DOCS_API_KEY"];
     assert p.validOk == ["forge"];

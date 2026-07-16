@@ -8,7 +8,7 @@ not — its delivery path is documented here (agentic-mcp-registry spec,
 |---|---|---|
 | **Claude Code** | native | project tier: `.mcp.json` (mcp-servers-nix claude-code flavor, symlinked by the devenv bootstrap); user tier: home-manager `programs.mcp` + `programs.claude-code.enableMcpIntegration` |
 | **OpenCode** | native | project tier: opencode config (mcp-servers-nix opencode flavor); user tier: `programs.mcp` + `programs.opencode.enableMcpIntegration` |
-| **Codex** | native, **user-tier only** | Codex reads MCP servers from its user-level TOML (`~/.codex/config.toml`, `mcp_servers` key). Delivery is the home-manager plane: `programs.mcp` + `programs.codex.enableMcpIntegration` (upstream ships the integration). There is no project-tier codex file — do not invent one. |
+| **Codex** | native | Codex reads the registry's user tier from its writable user-level TOML (`~/.codex/config.toml`, `mcp_servers` key). Delivery is the home-manager plane: `programs.mcp` + `programs.codex.enableMcpIntegration` (upstream ships the integration). Pinned Serena is declared once for both tiers, so it is included in this Codex user projection while remaining available to project-tier consumers. Agentic does not invent a project-tier Codex file. |
 | **Pi** | **none in core** | see below |
 
 ## Pi

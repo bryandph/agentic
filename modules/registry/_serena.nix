@@ -69,7 +69,7 @@ in {
       type = lib.types.enum ["memory-only" "full"];
       default = "full";
       description = ''
-        Deployment shape of the project-tier serena entry.
+        Deployment shape of the Serena registry entry.
         `memory-only`: fixed_tools restricted to the memory tool set,
         no language servers. `full`: symbolic tooling — the default
         where the harness lacks native LSP (Codex, Pi).
@@ -100,7 +100,7 @@ in {
     agentic.serena.lib = {inherit wrapperFor memoryContextFile memoryTools serenaPackage;};
 
     agentic.mcp.servers.serena = {
-      tiers = ["project"];
+      tiers = ["user" "project"];
       command = pkgs: "${wrapperFor pkgs cfg.shape}/bin/serena-${cfg.shape}";
     };
   };

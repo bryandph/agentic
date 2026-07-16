@@ -1,9 +1,10 @@
-# Fixture check for the pinned serena entry (task 2.5): the project-tier
-# entry resolves to the lock-pinned mcp-servers-nix package through a
-# wrapper carrying --project "$(pwd)" and PYTHONPATH isolation; both
-# deployment shapes render — memory-only with a fixed_tools custom
-# context and no language servers, full with the built-in context and
-# declared language servers on PATH.
+# Fixture check for the pinned serena entry (task 2.5): one dual-tier
+# definition resolves to the lock-pinned mcp-servers-nix package through
+# a wrapper carrying --project "$(pwd)" and PYTHONPATH isolation. The
+# user tier renders into Codex's native MCP schema, and both deployment
+# shapes render — memory-only with a fixed_tools custom context and no
+# language servers, full with the built-in context and declared language
+# servers on PATH.
 {
   inputs,
   config,
@@ -30,6 +31,9 @@
               serena-full = config.agentic.serena.lib.wrapperFor pkgs "full";
               serena-memory = config.agentic.serena.lib.wrapperFor pkgs "memory-only";
               serena-context = config.agentic.serena.lib.memoryContextFile pkgs;
+              serena-codex-user = pkgs.writeText "serena-codex-user.json" (
+                builtins.toJSON (config.agentic.mcp.lib.renderCodexTier pkgs "user")
+              );
             };
           };
         })
@@ -38,15 +42,21 @@
 
     fp = n: fixture.packages.${system}.${n};
   in {
-    checks.serena = assert fixture.agenticProbe.serenaTiers == ["project"];
+    checks.serena = assert fixture.agenticProbe.serenaTiers == ["user" "project"];
       pkgs.runCommand "agentic-serena" {
-        nativeBuildInputs = [pkgs.gnugrep];
+        nativeBuildInputs = [pkgs.gnugrep pkgs.jq];
       } ''
         set -euo pipefail
 
         full=${fp "serena-full"}/bin/serena-full
         memory=${fp "serena-memory"}/bin/serena-memory-only
         context=${fp "serena-context"}
+        codex_user=${fp "serena-codex-user"}
+
+        # The same registry definition reaches Codex through the user
+        # tier and retains the pinned full-shape wrapper command.
+        [ "$(jq -r 'has("serena")' "$codex_user")" = true ]
+        [ "$(jq -r '.serena.command' "$codex_user")" = "$full" ]
 
         # Both shapes: pinned binary (store path, not nix run), project
         # pinning expanded by the wrapper shell, PYTHONPATH isolation.
