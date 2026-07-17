@@ -162,7 +162,13 @@ in {
     };
     mode = lib.mkOption {
       type = lib.types.str;
-      default = "session";
+      default = "window";
+      description = ''
+        workmux worktree layout: "window" (works with both the herdr
+        and tmux backends) or "session" (tmux only — the herdr backend
+        rejects session mode outright). Defaults to "window" because the
+        fleet drives the herdr backend (workmux input is the herdr fork).
+      '';
     };
     agent = lib.mkOption {
       type = lib.types.str;
