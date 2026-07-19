@@ -3,10 +3,9 @@
 # (modules/adapters/devenv.nix) AND the devenv-native shim (/devenv.nix)
 # so both transports produce the same artifact set.
 #
-# On shell entry, idempotently places: `.mcp.json`, `.codex/config.toml`,
-# and opencode config
-# (rendered by upstream mcp-servers-nix lib from the project-tier
-# registry), agent directories, the generated `.serena/project.yml` +
+# Devenv's managed-file lifecycle places `.mcp.json`,
+# `.codex/config.toml`, and the OpenCode config. On shell entry this
+# module idempotently places agent directories, the generated `.serena/project.yml` +
 # read-only memory namespace, the generated `.workmux.yaml`, and the
 # http-secret exports. `AGENTS.md`/`CLAUDE.md` are committed artifacts,
 # never shell-entry placements.
@@ -41,13 +40,30 @@
     .config
     .configFile;
 
+  managedMcpConfig = pkgs: {
+    flavors = {
+      claude-code = {
+        enable = true;
+        settings.servers = acfg.mcp.lib.renderTier pkgs "project";
+      };
+      codex = {
+        enable = true;
+        settings.servers = acfg.mcp.lib.renderCodexTier pkgs "project";
+      };
+      opencode = {
+        enable = true;
+        settings = {
+          "$schema" = "https://opencode.ai/config.json";
+          servers = acfg.mcp.lib.renderTier pkgs "project";
+        };
+      };
+    };
+  };
+
   bootstrapScript = pkgs: ''
     # agentic bootstrap — idempotent; re-entry changes nothing when
     # inputs are unchanged.
-    ln -sf ${projectConfigFor pkgs "claude-code"} .mcp.json
-    ln -sf ${projectConfigFor pkgs "opencode"} opencode.json
-    mkdir -p .claude .codex .opencode
-    ln -sf ${projectConfigFor pkgs "codex"} .codex/config.toml
+    mkdir -p .claude .opencode
     # Replace leftover real (empty) dirs from pre-generated layouts,
     # then point the agent dirs at the rendered farms.
     [ -d .claude/agents ] && [ ! -L .claude/agents ] && rmdir .claude/agents 2>/dev/null || true
@@ -67,17 +83,19 @@ in {
   options.agentic.devenvLib = lib.mkOption {
     type = lib.types.raw;
     readOnly = true;
-    description = "Bootstrap building blocks: `bootstrapScript pkgs`, `projectConfigFor pkgs flavor` (including Codex TOML), `packages pkgs`, `shellModule` (the devenv module body both transports wire).";
+    description = "Bootstrap building blocks: `bootstrapScript pkgs`, `projectConfigFor pkgs flavor`, `managedMcpConfig pkgs`, `packages pkgs`, and `shellModule` (the devenv module body both transports wire).";
   };
 
   config.agentic.devenvLib = {
-    inherit bootstrapScript projectConfigFor;
+    inherit bootstrapScript managedMcpConfig projectConfigFor;
     # Workflow CLIs the shell should carry: knowledge search (the CLI
     # equivalent Pi relies on).
     packages = pkgs: [(acfg.knowledgeSearch.lib.wrapper pkgs)];
 
     # The devenv module body — identical under both transports.
     shellModule = {pkgs, ...}: {
+      imports = [(builtins.toPath "${agenticInputs.mcpServersSrc}/modules/devenv.nix")];
+      mcp-servers = managedMcpConfig pkgs;
       packages = acfg.devenvLib.packages pkgs;
       enterShell = bootstrapScript pkgs;
       # One worktree setup path for ALL creators (agentic-devenv spec):

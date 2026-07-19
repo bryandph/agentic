@@ -1,5 +1,5 @@
 # Fixture check for the delivery adapters (task 2.4): one registry, and
-# the project-tier artifacts (.mcp.json + opencode config) render from
+# the project-tier artifacts (.mcp.json, Codex TOML, and OpenCode config) render from
 # it through the upstream mcp-servers-nix module — consistent content,
 # per-flavor format owned upstream. The wired user-tier HM module must
 # be published into the consumer's modules namespace (its full HM eval
@@ -51,6 +51,7 @@
           perSystem = {config, ...}: {
             packages = {
               fixture-claude-config = config.mcp-servers.configs.claude-code;
+              fixture-codex-config = config.mcp-servers.configs.codex;
               fixture-opencode-config = config.mcp-servers.configs.opencode;
             };
           };
@@ -60,12 +61,19 @@
   in {
     checks.adapters = assert fixture.agenticProbe.hmPublished;
       pkgs.runCommand "agentic-adapters" {
-        nativeBuildInputs = [pkgs.jq pkgs.gnugrep];
+        nativeBuildInputs = [pkgs.jq pkgs.gnugrep pkgs.python3];
       } ''
         set -euo pipefail
 
         claude=${fixture.packages.${system}.fixture-claude-config}
+        codex=${fixture.packages.${system}.fixture-codex-config}
         opencode=${fixture.packages.${system}.fixture-opencode-config}
+
+        claude_names=$(jq -r '.mcpServers | keys | join(",")' "$claude")
+        codex_names=$(python -c 'import sys, tomllib; print(",".join(sorted(tomllib.load(open(sys.argv[1], "rb"))["mcp_servers"])))' "$codex")
+        opencode_names=$(jq -r '.mcp | keys | join(",")' "$opencode")
+        [ "$claude_names" = "$codex_names" ]
+        [ "$claude_names" = "$opencode_names" ]
 
         # .mcp.json (claude-code flavor): registry entries under
         # mcpServers, stdio command wrapped, http header untouched.

@@ -20,7 +20,7 @@
     # owns file formats. Consumers lock this pin through their own
     # flake.lock (follows-overridable).
     mcp-servers-nix = {
-      url = "github:natsukium/mcp-servers-nix";
+      url = "github:bryandph/mcp-servers-nix/11c18bdce72a134168384a09b9df52268d3dcfd9";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

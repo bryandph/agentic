@@ -60,16 +60,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1784034644,
-        "narHash": "sha256-SLHR64tjv0nFnEX376h8kG+edPeBBzCNEvh7GFE9INI=",
-        "owner": "natsukium",
+        "lastModified": 1784459989,
+        "narHash": "sha256-20D8icMnLMSozaAQ4tM+/yt836biaFltoehcrwBEX/Y=",
+        "owner": "bryandph",
         "repo": "mcp-servers-nix",
-        "rev": "fc8000cb10d4e56487ec2277d21f04932682f1af",
+        "rev": "11c18bdce72a134168384a09b9df52268d3dcfd9",
         "type": "github"
       },
       "original": {
-        "owner": "natsukium",
+        "owner": "bryandph",
         "repo": "mcp-servers-nix",
+        "rev": "11c18bdce72a134168384a09b9df52268d3dcfd9",
         "type": "github"
       }
     },

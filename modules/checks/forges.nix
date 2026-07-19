@@ -44,7 +44,8 @@
 
     p = fixture.agenticProbe;
   in {
-    checks.forges = assert p.userTier == ["github" "private-forge"];
+    # Serena is supplied by the core memory-plane module in both tiers.
+    checks.forges = assert p.userTier == ["github" "private-forge" "serena"];
     assert p.servers.private-forge.env.GITEA_HOST == "https://forge.fixture.example";
     assert p.servers.private-forge.secrets ? GITEA_ACCESS_TOKEN;
     assert p.servers.private-forge.secrets.GITEA_ACCESS_TOKEN.env == "GITEA_ACCESS_TOKEN";

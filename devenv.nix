@@ -48,8 +48,10 @@ in {
     ./modules/registry/_workmux.nix
     ./modules/registry/_bootstrap.nix
     ./modules/registry/_core-fragments.nix
+    (builtins.toPath "${locked "mcp-servers-nix"}/modules/devenv.nix")
   ];
 
+  mcp-servers = config.agentic.devenvLib.managedMcpConfig pkgs;
   packages = config.agentic.devenvLib.packages pkgs;
   enterShell = config.agentic.devenvLib.bootstrapScript pkgs;
   claude.code.hooks.agentic-worktree-setup = {
