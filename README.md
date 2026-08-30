@@ -44,6 +44,25 @@ Consumers do **not** need any of that — the supported surfaces are:
 - `flake.modules.<class>.<name>` — dendritic consumers may merge the
   namespace directly; it carries the same modules as the aliases above.
 
+### CI cache profile contract
+
+Environment layers may define `agentic.ciCache.profiles.{nix,rust,python}`.
+Repositories request the ecosystems they use through
+`agentic.ciCache.requestedProfiles`; the resolved, JSON-serializable contract
+is available as `flake.agenticCiCacheContract` and
+`config.agentic.ciCache.lib.contract` for the repository's own workflow
+renderer. Core never creates a workflow or supplies endpoints and credentials.
+
+The language templates request matching profiles, but those requests are
+inert unless an environment layer defines them. This keeps the same templates
+usable outside any particular organization and leaves out-of-shell packaging
+unchanged.
+
+Nix publication endpoints are split by trust tier: protected workflows may
+write the authoritative cache, while pull requests may write only their
+quarantine endpoint. The contract explicitly forbids protected substitution
+from pull-request entries and direct promotion between the two tiers.
+
 Versioning: consumers pin a **tag or locked rev** (never an
 implicitly-tracked branch). The API is 0.x until a second environment
 consumes it; expect breaking changes between 0.x tags.

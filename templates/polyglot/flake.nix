@@ -47,6 +47,9 @@
       # fragments, agents, and instruction scopes here (see the agentic
       # README).
       agentic.memoryPlane.projectName = "CHANGE-ME";
+      # Inert without an environment layer; when that layer supplies these
+      # profiles, its contract is exposed without taking ownership of CI.
+      agentic.ciCache.requestedProfiles = ["nix" "rust" "python"];
 
       perSystem = _: {
         devenv.shells.default = {
