@@ -98,6 +98,19 @@ expect "identical tier endpoints are refused" "$r" '.outcome == "refused"'
 none_contract="$(jq -c 'del(.profiles.nix.pullRequestWriteEndpoint)' "$AGENTIC_CI_CACHE_CONTRACT")"
 r="$(AGENTIC_CI_CACHE_CONTRACT="$none_contract" as_pull_request "$run" nix publish "$path" 2>/dev/null)"
 expect "no quarantine configured disables pull-request publication" "$r" '.outcome == "skipped" and (.detail | contains("quarantine"))'
+# Nix has no client-side identity key: a lock, toolchain, or architecture
+# change yields a different store path, and publication is by path. Two
+# payloads publish as two distinct narinfos; re-publishing a path is idempotent.
+echo "fixture payload changed" >"$TMPDIR/payload2"
+path2="$(nix store add --mode flat "$TMPDIR/payload2" 2>/dev/null)"
+hash2="$(basename "$path2" | cut -d- -f1)"
+[ "$hash2" != "$hash" ] || fail "changed content did not change the store path"
+r="$(as_protected "$run" nix publish "$path2" 2>/dev/null)"
+expect "changed input publishes as a distinct store path" "$r" '.outcome == "published" and .path_count == 1'
+[ -f "$bc/protected/$hash2.narinfo" ] && [ -f "$bc/protected/$hash.narinfo" ] || fail "distinct narinfos missing"
+r="$(as_protected "$run" nix publish "$path" 2>/dev/null)"
+expect "re-publishing an already published path is idempotent" "$r" '.outcome == "published"'
+[ "$(find "$bc/protected" -name '*.narinfo' | wc -l)" -eq 2 ] || fail "idempotent publish duplicated narinfos"
 r="$(AGENTIC_NIX_PUBLISH_MAX_PATHS=0 as_protected "$run" nix publish "$path" 2>/dev/null)"
 expect "closure above the bound is skipped" "$r" '.outcome == "skipped-bound" and .bound == 0'
 r="$(as_protected "$run" nix publish /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-nope 2>/dev/null)"
@@ -142,6 +155,34 @@ e3="$(as_protected env "$gen=fy" "$run" sccache env 2>/dev/null)"
 [ "$e" != "$e3" ] || fail "cache generation does not change the namespace"
 pass "cache generation participates in the key"
 
+# Toolchain and architecture identity come from `rustc -vV` on PATH. Each stub
+# varies exactly one input against the real toolchain's baseline: the
+# toolchain stub keeps the real host and changes release/commit; the
+# architecture stub keeps the real release/commit and changes the host.
+real_prefix="$(grep -o 'SCCACHE_S3_KEY_PREFIX=.*' <<<"$e" | cut -d= -f2-)"
+real_vv="$(rustc -vV)"
+real_host="$(awk '/^host:/ {print $2}' <<<"$real_vv")"
+real_release="$(awk '/^release:/ {print $2}' <<<"$real_vv")"
+real_hash="$(awk '/^commit-hash:/ {print $2}' <<<"$real_vv")"
+real_compiler="$(awk -F/ '{print $7}' <<<"$real_prefix")"
+[ "$real_compiler" = "${real_release}-${real_hash:0:9}" ] || fail "baseline compiler segment unexpected: $real_compiler"
+stub_rustc() {
+  # stub_rustc DIR HOST RELEASE HASH
+  mkdir -p "$1"
+  printf '#!/bin/sh\nprintf "rustc %s (%s 2026-01-01)\\nbinary: rustc\\ncommit-hash: %s\\ncommit-date: 2026-01-01\\nhost: %s\\nrelease: %s\\n"\n' "$3" "$4" "$4" "$2" "$3" >"$1/rustc"
+  chmod +x "$1/rustc"
+}
+stub_rustc "$TMPDIR/rustc-other-toolchain" "$real_host" "1.0.0-fixture" "0123456789abcdef"
+e4="$(PATH="$TMPDIR/rustc-other-toolchain:$PATH" as_protected env "$gen=fx" "$run" sccache env 2>/dev/null | grep -o 'SCCACHE_S3_KEY_PREFIX=.*' | cut -d= -f2-)"
+[ "$e4" = "ci/fixture/fixture/consumer/protected/$real_host/1.0.0-fixture-012345678/fx/" ] || fail "toolchain-only change produced unexpected namespace: $e4"
+[ "$e4" != "$real_prefix" ] || fail "toolchain change kept the namespace"
+pass "toolchain-only change (same host, other rustc release/commit) selects a different namespace"
+stub_rustc "$TMPDIR/rustc-other-arch" "fixture-other-arch-unknown-none" "$real_release" "$real_hash"
+e5="$(PATH="$TMPDIR/rustc-other-arch:$PATH" as_protected env "$gen=fx" "$run" sccache env 2>/dev/null | grep -o 'SCCACHE_S3_KEY_PREFIX=.*' | cut -d= -f2-)"
+[ "$e5" = "ci/fixture/fixture/consumer/protected/fixture-other-arch-unknown-none/$real_compiler/fx/" ] || fail "architecture-only change produced unexpected namespace: $e5"
+[ "$e5" = "${real_prefix/$real_host/fixture-other-arch-unknown-none}" ] || fail "architecture change altered more than the host segment: $e5 vs $real_prefix"
+pass "architecture-only change (same rustc release/commit, other host) selects a different namespace"
+
 clean
 as_pull_request env "$gen=fx" "$run" sccache run -- cargo build --offline -q 2>"$TMPDIR/err" || {
   cat "$TMPDIR/err" >&2
@@ -182,6 +223,11 @@ as_pull_request "$run" sccache run -- cargo build --offline -q 2>"$TMPDIR/err" |
 r="$(as_pull_request "$run" sccache stats)"
 expect "warm build: server reused, cache hits recorded" "$r" '([.statistics.stats.cache_hits.counts[]] | add) >= 1'
 find "$obj/fixture-compiler-cache/ci/fixture/fixture/consumer/pull-request" -type f | grep -q . || fail "pull-request namespace empty on disk"
+# The warm namespace belongs to the real toolchain only: another toolchain's
+# namespace does not exist on the backend (a build with it would start cold).
+e6="$(PATH="$TMPDIR/rustc-other-toolchain:$PATH" as_pull_request "$run" sccache env 2>/dev/null | grep -o 'SCCACHE_DIR=.*' | cut -d= -f2-)"
+[ -n "$e6" ] && [ ! -e "$e6" ] || fail "other toolchain unexpectedly shares the warm namespace: $e6"
+pass "warm sccache namespace is not shared with another toolchain (cold for it)"
 clean
 as_protected "$run" sccache run -- cargo build --offline -q 2>"$TMPDIR/err" || fail "protected build failed"
 r="$(as_protected "$run" sccache stats)"
@@ -266,6 +312,17 @@ r="$(as_protected "$run" uv restore)"
 expect "lock change invalidates the exact key" "$r" '.outcome == "miss"'
 r="$(AGENTIC_UV_CACHE_GENERATION=other as_protected "$run" uv restore)"
 expect "uv generation change invalidates the exact key" "$r" '.outcome == "miss" and (.identity.key | contains("/other/"))'
+# Python ABI is queried from the interpreter in use: with the real python
+# off PATH, a stub python3 reporting another ABI (reached through the
+# helper's PATH fallback) must change the key and miss.
+echo "lock-v1" >uv.lock
+mkdir -p "$TMPDIR/py-other"
+printf '#!/bin/sh\necho cpython-000-fixture-other-abi\n' >"$TMPDIR/py-other/python3"
+chmod +x "$TMPDIR/py-other/python3"
+real_py_dir="$(dirname "$(command -v python3)")"
+path_without_py="$(tr ':' '\n' <<<"$PATH" | grep -vxF "$real_py_dir" | paste -sd: -)"
+r="$(PATH="$TMPDIR/py-other:$path_without_py" as_protected "$run" uv restore)"
+expect "python ABI change invalidates the exact key" "$r" '.outcome == "miss" and (.identity.python_abi == "cpython-000-fixture-other-abi") and (.identity.key | contains("/cpython-000-fixture-other-abi/"))'
 echo "lock-v1" >uv.lock
 rm -f "$obj/fixture-python-cache/$key_v1"
 rm -rf "$UV_CACHE_DIR"
