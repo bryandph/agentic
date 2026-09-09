@@ -695,12 +695,23 @@ uv_identity() {
   # throwaway cache.
   local scratch
   scratch="$(mktemp -d)"
-  if ! py="$(UV_CACHE_DIR="$scratch" UV_PYTHON_DOWNLOADS=never uv python find 2>/dev/null)" || [ -z "$py" ]; then
-    rm -rf -- "$scratch"
-    UV_DETAIL="uv could not find a Python interpreter for the ABI identity"
+  py="$(UV_CACHE_DIR="$scratch" UV_PYTHON_DOWNLOADS=never uv python find 2>/dev/null)" \
+    || py="$(UV_CACHE_DIR="$scratch" UV_PYTHON_DOWNLOADS=never UV_PYTHON_PREFERENCE=only-system uv python find 2>/dev/null)" \
+    || py=""
+  rm -rf -- "$scratch"
+  # uv's managed-installation discovery needs a system ELF interpreter to
+  # probe; where that is unavailable (hermetic sandboxes), fall back to the
+  # interpreter uv itself would honour: UV_PYTHON, then python3 on PATH.
+  if [ -z "$py" ] && [ -n "${UV_PYTHON:-}" ] && [ -x "${UV_PYTHON}" ]; then
+    py="$UV_PYTHON"
+  fi
+  if [ -z "$py" ]; then
+    py="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+  fi
+  if [ -z "$py" ]; then
+    UV_DETAIL="no Python interpreter is available for the ABI identity (uv discovery, UV_PYTHON, and PATH all failed)"
     return 1
   fi
-  rm -rf -- "$scratch"
   if ! UV_ABI="$("$py" -c 'import sys, sysconfig; print(sysconfig.get_config_var("SOABI") or sys.implementation.cache_tag)' 2>/dev/null)" || [ -z "$UV_ABI" ]; then
     UV_DETAIL="Python ABI identity could not be resolved from $py"
     return 1
