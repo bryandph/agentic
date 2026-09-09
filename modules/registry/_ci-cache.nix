@@ -1,10 +1,16 @@
 # CI cache contract shared by environment layers and consuming repos.
 #
-# Core defines only the typed interface and trust invariants. An environment
+# Core defines the typed interface, the trust invariants, and the consumer-
+# side client that implements them (`agentic-ci-cache`, built by
+# _ci-cache-tool.nix from _ci-cache/agentic-ci-cache.sh). An environment
 # layer supplies endpoints and runtime secret variable names; a repository
 # requests the ecosystems it uses and remains responsible for its pipeline.
 # Missing profiles are intentionally ignored so the same repo evaluates as an
 # org-neutral consumer when no environment layer is imported.
+#
+# Credential convention (enforced by the client): every secret is read only
+# from a trust-tier-prefixed variable, CI_CACHE_PROTECTED_<NAME>[_FILE] or
+# CI_CACHE_PULL_REQUEST_<NAME>[_FILE]; a workflow mounts only its own tier.
 {
   lib,
   config,
@@ -12,12 +18,23 @@
 }: let
   inherit (lib) mkOption types;
   cfg = config.agentic.ciCache;
+  tool = import ./_ci-cache-tool.nix {inherit lib;};
+
+  credentialEnvPrefixes = {
+    protected = "CI_CACHE_PROTECTED_";
+    pull-request = "CI_CACHE_PULL_REQUEST_";
+  };
 
   profileCommon = {
     runtimeSecretEnv = mkOption {
       type = types.listOf types.str;
       default = [];
-      description = "Names of runtime-provided secret variables required by the cache client; values never enter the contract.";
+      description = ''
+        Base names of the runtime-provided secrets the cache client resolves
+        through the trust-tier-prefixed variables (CI_CACHE_PROTECTED_<NAME>
+        or CI_CACHE_PULL_REQUEST_<NAME>, each also accepting a _FILE variant).
+        Values never enter the contract.
+      '';
     };
 
     observability = mkOption {
@@ -74,10 +91,19 @@
         };
       };
 
-    config.observability = [
-      "substitution-summary"
-      "publication-result"
-    ];
+    config = {
+      observability = [
+        "substitution-summary"
+        "publication-result"
+      ];
+      # Protected endpoints over HTTP(S) authenticate with NIX_CACHE_TOKEN (or
+      # a ready NIX_NETRC_FILE); s3:// endpoints use the AWS pair.
+      runtimeSecretEnv = lib.mkDefault [
+        "NIX_CACHE_TOKEN"
+        "AWS_ACCESS_KEY_ID"
+        "AWS_SECRET_ACCESS_KEY"
+      ];
+    };
   };
 
   rustProfileType = types.submodule {
@@ -126,10 +152,16 @@
         };
       };
 
-    config.observability = [
-      "sccache-statistics"
-      "publication-result"
-    ];
+    config = {
+      observability = [
+        "sccache-statistics"
+        "publication-result"
+      ];
+      runtimeSecretEnv = lib.mkDefault [
+        "AWS_ACCESS_KEY_ID"
+        "AWS_SECRET_ACCESS_KEY"
+      ];
+    };
   };
 
   pythonProfileType = types.submodule {
@@ -185,10 +217,16 @@
         };
       };
 
-    config.observability = [
-      "uv-cache-summary"
-      "publication-result"
-    ];
+    config = {
+      observability = [
+        "uv-cache-summary"
+        "publication-result"
+      ];
+      runtimeSecretEnv = lib.mkDefault [
+        "AWS_ACCESS_KEY_ID"
+        "AWS_SECRET_ACCESS_KEY"
+      ];
+    };
   };
 
   availableProfiles =
@@ -217,6 +255,16 @@
       pullRequestWritesOwnNamespace = true;
       protectedReadsPullRequest = false;
       directPromotion = false;
+      # Pull-request Nix outputs reach only the quarantine endpoint; a
+      # protected pipeline rebuilds and publishes its own closures. Nothing is
+      # ever copied quarantine -> protected.
+      promotion = "rebuild";
+      # The quarantine is never a substituter for any tier: a lane's store is
+      # shared by every pipeline on it, so unsigned pull-request outputs must
+      # not be substituted into it. This isolates *publication*; it does not
+      # isolate a pull request's builds from the shared lane store itself.
+      quarantineSubstitution = false;
+      inherit credentialEnvPrefixes;
     };
     profiles = selectedProfiles;
   };
@@ -256,12 +304,20 @@ in {
     lib = mkOption {
       type = types.raw;
       readOnly = true;
-      description = "Resolved, JSON-serializable CI cache contract for the consuming repository's workflow renderer.";
+      description = "Resolved contract (`contract`, JSON-serializable), its store file (`contractFile pkgs`), and the pre-wired client (`tools pkgs`).";
     };
   };
 
   config = {
-    agentic.ciCache.lib = {inherit contract;};
+    agentic.ciCache.lib = {
+      inherit contract;
+      # Store path of the contract JSON (public metadata only).
+      contractFile = pkgs: tool.contractFile pkgs contract;
+      # `agentic-ci-cache` with this contract pre-wired; the same binary is
+      # published standalone as packages.<system>.ci-cache for consumers that
+      # do not import the flake module.
+      tools = pkgs: tool.mkWrappedTool pkgs (tool.mkTool pkgs) (tool.contractFile pkgs contract);
+    };
     flake.agenticCiCacheContract = contract;
   };
 }

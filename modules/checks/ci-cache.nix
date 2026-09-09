@@ -1,6 +1,8 @@
-# Cache-profile contract checks. The fixture environment uses only
-# *.fixture.example values; neutral fixtures deliberately request profiles
-# without defining any, matching a template instantiated without an env layer.
+# Cache-profile contract checks. The fixture environment
+# (_fixtures/ci-cache-environment.nix) uses only *.fixture.example values;
+# neutral fixtures deliberately request profiles without defining any,
+# matching a template instantiated without an env layer. The client's
+# runtime behaviour is exercised by ci-cache-tools.nix.
 {
   inputs,
   config,
@@ -11,37 +13,7 @@
     system,
     ...
   }: let
-    environmentProfiles = {
-      nix = {
-        readEndpoints = ["https://nix-cache.fixture.example"];
-        protectedWriteEndpoint = "https://nix-upload.fixture.example";
-        pullRequestWriteEndpoint = "s3://nix-quarantine-fixture";
-        trustedPublicKeys = ["fixture-cache.example-1:PUBLIC-KEY-FIXTURE"];
-        runtimeSecretEnv = ["NIX_CACHE_TOKEN"];
-      };
-
-      rust = {
-        endpoint = "https://objects.fixture.example";
-        bucket = "fixture-compiler-cache";
-        region = "fixture-1";
-        keyPrefix = "ci/fixture";
-        runtimeSecretEnv = [
-          "AWS_ACCESS_KEY_ID"
-          "AWS_SECRET_ACCESS_KEY"
-        ];
-      };
-
-      python = {
-        endpoint = "https://objects.fixture.example";
-        bucket = "fixture-python-cache";
-        region = "fixture-1";
-        keyPrefix = "ci/fixture";
-        runtimeSecretEnv = [
-          "AWS_ACCESS_KEY_ID"
-          "AWS_SECRET_ACCESS_KEY"
-        ];
-      };
-    };
+    environmentProfiles = import ./_fixtures/ci-cache-environment.nix;
 
     mkFixture = {
       requestedProfiles,
@@ -142,8 +114,14 @@
 
         jq -e '.profiles.nix.publicationMode == "completed-closures"' "$environmentRustContract" >/dev/null
         jq -e '.profiles.nix.protectedWriteEndpoint == "https://nix-upload.fixture.example"' "$environmentRustContract" >/dev/null
-        jq -e '.profiles.nix.pullRequestWriteEndpoint == "s3://nix-quarantine-fixture"' "$environmentRustContract" >/dev/null
+        jq -e '.profiles.nix.pullRequestWriteEndpoint | startswith("s3://nix-quarantine-fixture")' "$environmentRustContract" >/dev/null
         jq -e '.trustPolicy.directPromotion == false' "$environmentRustContract" >/dev/null
+        jq -e '.trustPolicy.promotion == "rebuild"' "$environmentRustContract" >/dev/null
+        jq -e '.trustPolicy.quarantineSubstitution == false' "$environmentRustContract" >/dev/null
+        jq -e '.trustPolicy.credentialEnvPrefixes == {protected: "CI_CACHE_PROTECTED_", "pull-request": "CI_CACHE_PULL_REQUEST_"}' "$environmentRustContract" >/dev/null
+        jq -e '.profiles.nix.runtimeSecretEnv == ["NIX_CACHE_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]' "$environmentRustContract" >/dev/null
+        jq -e '.profiles.rust.runtimeSecretEnv == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]' "$environmentRustContract" >/dev/null
+        jq -e '.profiles.python.runtimeSecretEnv == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]' "$environmentPythonContract" >/dev/null
         jq -e '.profiles.rust.kind == "sccache"' "$environmentRustContract" >/dev/null
         jq -e '.profiles.rust.keyInputs == ["repository", "architecture", "compiler-generation", "cache-generation", "trust-tier"]' "$environmentRustContract" >/dev/null
         jq -e '.profiles.python.kind == "uv"' "$environmentPythonContract" >/dev/null

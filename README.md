@@ -63,6 +63,48 @@ write the authoritative cache, while pull requests may write only their
 quarantine endpoint. The contract explicitly forbids protected substitution
 from pull-request entries and direct promotion between the two tiers.
 
+#### The cache client: `agentic-ci-cache`
+
+Core also ships the consumer-side implementation of that contract. It is
+one CLI, delivered two ways:
+
+- **Standalone** — `packages.<system>.ci-cache` / `apps.<system>.ci-cache`
+  (`nix run github:bryandph/agentic#ci-cache -- …`). No flake-module import
+  is needed: the contract JSON is handed over at runtime through
+  `AGENTIC_CI_CACHE_CONTRACT` (a file path, or inline JSON). This is the path
+  for hand-written workflows and runner images.
+- **Pre-wired** — `config.agentic.ciCache.lib.tools pkgs` returns the same
+  binary with the resolved contract baked in (`lib.contractFile pkgs` is
+  the JSON itself). Endpoints and variable *names* are public metadata; no
+  secret value can enter the contract or the store.
+
+Subcommands: `identity`; `nix config` (substituter lines for `NIX_CONFIG`,
+never the quarantine); `nix publish <path>…` (bounded completed-closure
+publication to the tier's endpoint); `sccache env` / `sccache run -- <cmd>`
+/ `sccache stats`; `uv env` / `uv restore` / `uv publish`. Every cache
+action exits 0 and prints one JSON report line (`outcome`, `detail`,
+backend, repository, tier, identity) so failures are visible without
+becoming build failures; `sccache run` execs the command and propagates
+its exit status, degrading to an uncached build (`RUSTC_WRAPPER=""`, which
+also overrides `.cargo/config.toml`) when configuration, credentials, or
+the backend are unavailable.
+
+Trust tier comes from Woodpecker's `CI_PIPELINE_EVENT` /
+`CI_COMMIT_BRANCH` / `CI_REPO_DEFAULT_BRANCH` (or `AGENTIC_CI_TRUST_TIER`).
+Credentials are read **only** from tier-prefixed variables,
+`CI_CACHE_PROTECTED_<NAME>` and `CI_CACHE_PULL_REQUEST_<NAME>` (each with a
+`_FILE` variant); a workflow mounts only its own tier, un-prefixed legacy
+names are ignored, and a value found identical in both tiers is refused.
+Cache keys carry the tier (`<keyPrefix>/<repo>/<tier>/…`) so backend
+policies can scope each credential to its namespace.
+
+What the Nix quarantine does and does not isolate: pull-request closures
+are published only to the quarantine endpoint, the quarantine is never a
+substituter for any tier, and promotion is rebuild-based (a protected
+pipeline builds and publishes its own closures). It does **not** isolate a
+pull request's builds from a shared lane store or daemon on the worker
+itself — that boundary is the worker platform's, not this contract's.
+
 Versioning: consumers pin a **tag or locked rev** (never an
 implicitly-tracked branch). The API is 0.x until a second environment
 consumes it; expect breaking changes between 0.x tags.
