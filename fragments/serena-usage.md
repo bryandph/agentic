@@ -4,6 +4,12 @@ Serena is the project's **memory holder** — plain markdown under
 - Activate the project before any other serena call; then list
   memories and read the ones relevant to your task — `feedback/*` and
   `style/*` names encode load-bearing operator preferences.
+- In Pi, discover with `mcp({search: "serena activate_project"})`,
+  describe the returned tool with `mcp({describe: "<tool>"})`, then
+  call `mcp({tool: "<tool>", args: {project: "<absolute cwd>"}})`.
+  After activation, discover/list the memory and symbolic tools through
+  `mcp({server: "serena"})`. If metadata is absent, first connect with
+  `mcp({connect: "serena"})`; connection is not a Serena tool call.
 - Write durable findings (decisions + rationale, gotchas, bring-up
   research) via `write_memory`. Store **pointers, not snapshots**: "run
   X / see file Y" survives; copied values drift into lies. Ask: "will

@@ -184,6 +184,60 @@
 
     ${compileBody name agent}'';
 
+  renderPi = name: agent: ''
+    ---
+    description: ${builtins.toJSON agent.description}
+    ---
+
+    Adopt the `${name}` specialist role for this task. This is a prompt
+    in the current Pi session; workmux owns separate worker orchestration.
+    Scope and capability limits below are instructions, not a sandbox.
+
+    ${compileBody name agent}
+
+    ## Capabilities
+
+    File edits: ${
+      if agent.capabilities.edit
+      then "permitted"
+      else "not permitted"
+    }.
+    Shell commands: ${
+      if agent.capabilities.exec
+      then "permitted"
+      else "not permitted"
+    }.
+    Web access: ${
+      if agent.capabilities.web
+      then "permitted"
+      else "not permitted"
+    }.
+
+    For required MCP servers, use `mcp` search, describe, then call the
+    discovered tool. Activate Serena for the current project before other
+    Serena calls. Do not infer authorization from a tool being available.
+
+    Task: $ARGUMENTS
+  '';
+
+  piPackage = pkgs:
+    pkgs.linkFarm "pi-agent-roles" (
+      [
+        {
+          name = "package.json";
+          path = pkgs.writeText "package.json" (builtins.toJSON {
+            name = "agentic-roles";
+            pi.prompts = ["./prompts"];
+          });
+        }
+      ]
+      ++ lib.mapAttrsToList (name: agent: {
+        name = "prompts/role-${name}.md";
+        path = pkgs.writeText "role-${name}.md" (renderPi name agent);
+      })
+      cfg.agents
+    );
+
   agentsDir = render: farmName: pkgs:
     pkgs.linkFarm farmName (
       lib.mapAttrsToList (n: agent: {
@@ -208,13 +262,15 @@ in {
         agent` (markdown strings), `claudeAgentsDir pkgs` /
         `opencodeAgentsDir pkgs` (link farms for
         .claude/agents / .opencode/agents), and the derivation
-        helpers `claudeTools` / `opencodePermission`.
+        helpers `claudeTools` / `opencodePermission`. Pi: `renderPi`,
+        `piPackage pkgs` (local package of /role-<name> prompt templates),
+        and `compileBody` (the shared body before platform framing).
       '';
     };
   };
 
   config.agentic.agentsLib = {
-    inherit renderClaude renderOpencode claudeTools opencodePermission;
+    inherit compileBody renderClaude renderOpencode renderPi piPackage claudeTools opencodePermission;
     claudeAgentsDir = agentsDir renderClaude "claude-agents";
     opencodeAgentsDir = agentsDir renderOpencode "opencode-agents";
   };

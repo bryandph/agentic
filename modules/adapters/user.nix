@@ -23,6 +23,8 @@
   }: {
     imports = [inputs.mcp-servers-nix.homeManagerModules.default];
 
+    options.agentic.mcp.sharedUserConfig.enable = lib.mkEnableOption "shared user MCP delivery to ~/.config/mcp/mcp.json (including Pi)";
+
     options.agentic.mcp.userServers = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       default = {};
@@ -33,7 +35,14 @@
       '';
     };
 
-    config.mcp-servers.settings.servers = config.agentic.mcp.userServers;
+    config = {
+      mcp-servers.settings.servers = config.agentic.mcp.userServers;
+      # Upstream Pi deliberately uses this literal shared path, not XDG_CONFIG_HOME.
+      # Keep the Pi-owned override files writable and outside HM ownership.
+      home.file.".config/mcp/mcp.json" = lib.mkIf config.agentic.mcp.sharedUserConfig.enable {
+        text = builtins.toJSON {mcpServers = config.programs.mcp.servers;};
+      };
+    };
   };
 in {
   # Static channel (core's own namespace -> exports.nix aliases).

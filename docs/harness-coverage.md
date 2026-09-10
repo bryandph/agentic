@@ -1,35 +1,19 @@
 # Harness coverage
 
-The registry targets four harnesses. Three consume MCP natively; Pi does
-not — its delivery path is documented here (agentic-mcp-registry spec,
-"Harness coverage including MCP-less harnesses").
+One MCP registry supplies four harnesses through shared artifacts.
 
-| Harness | MCP delivery | Channel |
-|---|---|---|
-| **Claude Code** | native | project tier: `.mcp.json` (mcp-servers-nix claude-code flavor, symlinked by the devenv bootstrap); user tier: home-manager `programs.mcp` + `programs.claude-code.enableMcpIntegration` |
-| **OpenCode** | native | project tier: opencode config (mcp-servers-nix opencode flavor); user tier: `programs.mcp` + `programs.opencode.enableMcpIntegration` |
-| **Codex** | native | Codex reads the registry's user tier from its writable user-level TOML (`~/.codex/config.toml`, `mcp_servers` key). Delivery is the home-manager plane: `programs.mcp` + `programs.codex.enableMcpIntegration` (upstream ships the integration). Pinned Serena is declared once for both tiers, so it is included in this Codex user projection while remaining available to project-tier consumers. Agentic does not invent a project-tier Codex file. |
-| **Pi** | **none in core** | see below |
+| Harness | MCP delivery |
+|---|---|
+| Claude Code | Project `.mcp.json`; user `programs.mcp` with native HM integration |
+| OpenCode | Project OpenCode config; user `programs.mcp` with native HM integration |
+| Codex | Project Codex TOML and user `programs.mcp` with native HM integration |
+| Pi | Pinned `pi-mcp-adapter` local package; shared project `.mcp.json` and user `~/.config/mcp/mcp.json`, with project trust gating |
 
-## Pi
+Pi's package contract, trust behavior, dependency pin, and validation commands
+are in [Pi delivery](pi.md). There is no extra server registry or Pi MCP flavor.
+CLI equivalents remain useful alongside MCP and appear in generated instructions;
+MCP-only servers are reachable through Pi's proxy.
 
-Pi has no core MCP support; MCP arrives via extensions/adapters. Two
-sanctioned paths, in preference order:
-
-1. **CLI equivalents** — servers whose *function* an agent may need on
-   every harness declare `cliEquivalent` in their registry definition
-   (knowledge/semantic search at minimum; fleet tooling like a fleet CLI
-   naturally qualifies since its MCP server is porcelain over the same
-   binary). The devenv bootstrap puts those CLIs on PATH, so a Pi agent
-   invokes the documented command instead of an MCP tool. Collected at
-   eval time via `agentic.mcp.lib.cliEquivalents` and surfaced in
-   generated instructions (`AGENTS.md`), which Pi does read.
-2. **pi-mcp-adapter / extension** — where a true MCP client is required,
-   run the community adapter as a Pi extension against the same rendered
-   project config. This is per-user setup, not rendered by core; treat
-   it as an escape hatch, not the default.
-
-Design consequence enforced by the schema: a registry entry that only
-exists as MCP (`cliEquivalent = null`) is understood to be unreachable
-from Pi. That is acceptable for harness-specific conveniences, never for
-knowledge access.
+Specialists use one compiled registry body. Claude Code and OpenCode have native
+agent projections; Pi receives ordinary `/role-<name>` prompt templates for the
+current session. Workmux owns worker orchestration.

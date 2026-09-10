@@ -62,6 +62,9 @@
       flake.agenticProbe = {
         builderClaude = config.agentic.agentsLib.renderClaude "builder" config.agentic.agents.builder;
         builderOpencode = config.agentic.agentsLib.renderOpencode "builder" config.agentic.agents.builder;
+        builderPi = config.agentic.agentsLib.renderPi "builder" config.agentic.agents.builder;
+        builderBody = config.agentic.agentsLib.compileBody "builder" config.agentic.agents.builder;
+        reviewerPi = config.agentic.agentsLib.renderPi "reviewer" config.agentic.agents.reviewer;
         reviewerClaude = config.agentic.agentsLib.renderClaude "reviewer" config.agentic.agents.reviewer;
         reviewerOpencode = config.agentic.agentsLib.renderOpencode "reviewer" config.agentic.agents.reviewer;
         renderedFiles = config.agentic.instructions.lib.renderedFiles;
@@ -128,6 +131,13 @@
       # Fragments compose in order with titles.
       assert lib.hasInfix "## fixture-conventions" p.builderClaude;
       assert lib.hasInfix "## Review discipline" p.builderClaude;
+      # Pi consumes the same compiled body as an ordinary prompt template.
+      assert lib.hasInfix p.builderBody p.builderPi;
+      assert lib.hasInfix scopeLine p.builderPi;
+      assert lib.hasInfix "File edits: permitted" p.builderPi;
+      assert lib.hasInfix "File edits: not permitted" p.reviewerPi;
+      assert lib.hasInfix "workmux owns" p.builderPi;
+      assert lib.hasInfix "$ARGUMENTS" p.builderPi;
       # Negative cases.
       assert oversizedFails;
       assert unknownFragmentFails;
@@ -162,6 +172,11 @@
           cp AGENTS.md before.md
           ${fixture.apps.${system}.write-agent-instructions.program}
           cmp AGENTS.md before.md
+
+          roles=${fixture.packages.${system}.pi-agent-roles}
+          test -f "$roles/package.json"
+          grep -qF 'Fixture conventions card' "$roles/prompts/role-builder.md"
+          grep -qF 'Shell commands: not permitted' "$roles/prompts/role-reviewer.md"
 
           touch $out
         '';

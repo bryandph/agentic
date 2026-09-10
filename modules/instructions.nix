@@ -52,16 +52,30 @@
     in
       lib.optionalString (clis != {}) ''
 
-        ## CLI equivalents (harnesses without MCP)
+        ## CLI equivalents (available alongside MCP)
 
         ${lib.concatStringsSep "\n" (lib.mapAttrsToList (n: c: "- `${n}`: ${c}") clis)}
       '';
+
+    piMcpSection = ''
+
+      ## Pi MCP discovery
+
+      With the Agentic Pi MCP package loaded, use `mcp({search: "capability"})`,
+      `mcp({describe: "<returned tool name>"})`, then
+      `mcp({tool: "<returned tool name>", args: {...}})`.
+      List servers with `mcp({})`; list a server's tools with
+      `mcp({server: "name"})`. If its metadata is absent, connect with
+      `mcp({connect: "name"})` and search again. Activate Serena for the
+      current project before any other Serena tool call, then list and read
+      relevant memories. Project MCP configuration requires Pi project trust.
+    '';
 
     renderAgentsMd = scopeDir: scope: ''
       ${header scope.fragments}
       # AGENTS.md
 
-      ${scope.intro}${renderFragments scope.fragments}${lib.optionalString (scopeDir == ".") cliSection}'';
+      ${scope.intro}${renderFragments scope.fragments}${lib.optionalString (scopeDir == ".") (piMcpSection + cliSection)}'';
 
     claudeMd = ''
       <!-- GENERATED FILE — DO NOT EDIT. Claude Code shim: the shared

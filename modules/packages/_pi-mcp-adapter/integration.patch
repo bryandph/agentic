@@ -1,0 +1,87 @@
+--- a/index.ts
++++ b/index.ts
+@@ -218,7 +218,7 @@
+     : options.configPath ?? getConfigPathFromArgv();
+   const earlyConfig = programmaticConfig
+     ? cloneMcpConfig(sessionConfig)
+-    : loadMcpConfig(earlyConfigPath);
++    : loadMcpConfig(earlyConfigPath, options.cwd);
+   const earlyCache = loadMetadataCache();
+   const envRaw = process.env.MCP_DIRECT_TOOLS;
+   const envDirectToolOverride = parseEnvDirectToolOverride(envRaw);
+--- a/index.ts
++++ b/index.ts
+@@ -1229,7 +1229,7 @@
+   // eager call, the tool-groups expansion runs before MCP initialization
+   // completes and emits false `[unknown-tool] mcp__<server>` diagnostics.
+   syncNamespaceTools(earlyConfig, earlyCache, initialDirectResult.reservedDirectNames, initialDirectResult.activeDirectNames);
+-  startLoadTimeInitialization();
++  // Agentic: session_start owns background resources, never extension load.
+ }
+ 
+ export function createMcpAdapter(options: McpAdapterOptions = {}) {
+--- a/index.ts
++++ b/index.ts
+@@ -1236,6 +1236,7 @@
+   const factoryConfig = options.config !== undefined ? cloneMcpConfig(options.config) : undefined;
+   return function mcpAdapter(pi: ExtensionAPI) {
+     installMcpAdapter(pi, {
++      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+       ...(options.configPath !== undefined ? { configPath: options.configPath } : {}),
+       ...(factoryConfig !== undefined ? { config: cloneMcpConfig(factoryConfig) } : {}),
+     });
+--- a/types.ts
++++ b/types.ts
+@@ -624,6 +624,8 @@
+ }
+ 
+ export interface McpAdapterOptions {
++  /** Agentic: initial config discovery follows the session cwd. */
++  cwd?: string;
+   config?: McpConfig;
+   configPath?: string;
+ }
+--- a/config.ts
++++ b/config.ts
+@@ -315,6 +315,19 @@
+   return structuredClone(config);
+ }
+ 
++/** Agentic: global-only snapshot for a session without project trust.
++ * Compatibility imports and package/plugin discovery may inspect project files,
++ * so they are deliberately excluded. No config writes or interpolation here.
++ */
++export function loadGlobalMcpConfig(): McpConfig {
++  let config: McpConfig = { mcpServers: {} };
++  for (const source of getConfigSources().filter(source => source.scope === "global")) {
++    const loaded = readValidatedConfig(source.readPath, "Global MCP config");
++    if (loaded) config = mergeConfigs(config, { mcpServers: loaded.mcpServers, settings: loaded.settings });
++  }
++  return config;
++}
++
+ export function loadMcpConfig(overridePath?: string, cwd = process.cwd()): McpConfig {
+   const sourceSpecs = getConfigSources(overridePath, cwd);
+   const hostConfigDiscovery = getConfiguredHostConfigDiscovery(overridePath, cwd);
+--- a/utils.ts
++++ b/utils.ts
+@@ -181,7 +181,7 @@
+   try {
+     new URL(resolved);
+   } catch (error) {
+-    throw new Error(`Invalid MCP server URL after environment interpolation: ${resolved}`, { cause: error });
++    throw new Error("Invalid MCP server URL after environment interpolation");
+   }
+   return resolved;
+ }
+--- a/server-manager.ts
++++ b/server-manager.ts
+@@ -1208,7 +1208,7 @@
+       if (token) headers["Authorization"] = `Bearer ${token}`;
+     }
+ 
+-    if (hasCommandHeader || commandBearer) {
++    if (Object.keys(headers).length > 0) {
+       try {
+         new Headers(headers);
+       } catch {

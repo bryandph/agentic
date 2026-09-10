@@ -44,6 +44,14 @@ Consumers do **not** need any of that — the supported surfaces are:
 - `flake.modules.<class>.<name>` — dendritic consumers may merge the
   namespace directly; it carries the same modules as the aliases above.
 
+Pi MCP delivery is available as `packages.<system>.pi-mcp-adapter`, a pinned
+local Pi package with its runtime dependencies. Opt into shared user MCP
+delivery with HM `agentic.mcp.sharedUserConfig.enable = true`; project delivery
+reuses `.mcp.json`. Consuming flakes also expose `pi-agent-roles`, a package of
+specialist prompt templates compiled from the agent registry. See
+[Pi delivery](docs/pi.md) for the trust boundary, mutable-file ownership,
+package contract, and targeted runtime check.
+
 ### CI cache profile contract
 
 Environment layers may define `agentic.ciCache.profiles.{nix,rust,python}`.

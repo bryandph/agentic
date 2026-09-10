@@ -6,7 +6,7 @@
 # Two deployment shapes (agentic-mcp-registry spec / D11):
 #
 #   * `memory-only` — a rendered custom context whose `fixed_tools` is
-#     exactly the memory tool set: no language servers, no symbolic
+#     the activation + memory tool set: no language servers, no symbolic
 #     tools, no LS startup tax. For harnesses with native LSP (Claude
 #     Code) or repos that only need the knowledge plane.
 #   * `full` — full symbolic tooling under a built-in context. The
@@ -42,8 +42,8 @@
     pkgs.writers.writeYAML "serena-memory-only-context.yml" {
       description = "Memory-plane-only context: knowledge access without language servers.";
       prompt = "You are operating on this project's knowledge memories only; use the memory tools.";
-      single_project = true;
-      fixed_tools = memoryTools;
+      single_project = false;
+      fixed_tools = ["activate_project"] ++ memoryTools;
     };
 
   wrapperFor = pkgs: shape: let
@@ -78,8 +78,8 @@ in {
 
     fullContext = lib.mkOption {
       type = lib.types.str;
-      default = "claude-code";
-      description = "Built-in serena context for the full shape (the claude-code context strips tools Claude Code natively duplicates).";
+      default = "agent";
+      description = "Built-in Serena context for the full shape. The agent context exposes activation and symbolic tools across harnesses; claude-code disables activate_project when launched with --project.";
     };
 
     languageServers = lib.mkOption {

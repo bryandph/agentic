@@ -67,7 +67,7 @@
         done
 
         # full: built-in context + declared language servers on PATH.
-        grep -qF -- '--context claude-code' "$full"
+        grep -qF -- '--context agent' "$full"
         grep -qF 'hello' "$full"
 
         # memory-only: custom context file with fixed_tools = memory
@@ -77,6 +77,8 @@
         grep -qF 'fixed_tools' "$context"
         grep -qF 'read_memory' "$context"
         grep -qF 'rename_memory' "$context"
+        grep -qF 'activate_project' "$context"
+        grep -qF 'single_project: false' "$context"
         ! grep -qE 'find_symbol|language_server' "$context"
 
         touch $out
