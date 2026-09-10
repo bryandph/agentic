@@ -1,17 +1,45 @@
 --- a/index.ts
 +++ b/index.ts
-@@ -218,7 +218,7 @@
+@@ -131,7 +131,7 @@
+ }
+ 
+ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
+-  const sessionConfig = options.config !== undefined ? cloneMcpConfig(options.config) : undefined;
++  let sessionConfig = options.config !== undefined ? cloneMcpConfig(options.config) : undefined;
+   const programmaticConfig = sessionConfig !== undefined;
+   let state: McpExtensionState | null = null;
+   let initPromise: Promise<McpExtensionState> | null = null;
+@@ -216,9 +216,9 @@
+   const earlyConfigPath = programmaticConfig
+     ? undefined
      : options.configPath ?? getConfigPathFromArgv();
-   const earlyConfig = programmaticConfig
+-  const earlyConfig = programmaticConfig
++  let earlyConfig = programmaticConfig
      ? cloneMcpConfig(sessionConfig)
 -    : loadMcpConfig(earlyConfigPath);
 +    : loadMcpConfig(earlyConfigPath, options.cwd);
    const earlyCache = loadMetadataCache();
    const envRaw = process.env.MCP_DIRECT_TOOLS;
    const envDirectToolOverride = parseEnvDirectToolOverride(envRaw);
---- a/index.ts
-+++ b/index.ts
-@@ -1229,7 +1229,7 @@
+@@ -667,6 +667,17 @@
+ 
+     if (generation !== lifecycleGeneration || !owner.isActive()) return;
+ 
++    if (options.resolveSessionConfig) {
++      // Revoke the previous surface before reading the next session's files.
++      sessionConfig = { mcpServers: {} };
++      earlyConfig = sessionConfig;
++      directToolsFrozen = false;
++      runtimeServers.clear();
++      syncToolSurface(ctx);
++      sessionConfig = cloneMcpConfig(options.resolveSessionConfig(ctx));
++      earlyConfig = sessionConfig;
++      syncToolSurface(ctx);
++    }
+     const initialization = startInitialization(ctx, owner, oauthRuntime, generation, "stale_session_start");
+     if (envRaw !== undefined && envRaw !== "__none__") {
+       const missingEnvDirectTools = getMissingConfiguredDirectToolServers(
+@@ -1229,13 +1240,15 @@
    // eager call, the tool-groups expansion runs before MCP initialization
    // completes and emits false `[unknown-tool] mcp__<server>` diagnostics.
    syncNamespaceTools(earlyConfig, earlyCache, initialDirectResult.reservedDirectNames, initialDirectResult.activeDirectNames);
@@ -20,22 +48,24 @@
  }
  
  export function createMcpAdapter(options: McpAdapterOptions = {}) {
---- a/index.ts
-+++ b/index.ts
-@@ -1236,6 +1236,7 @@
    const factoryConfig = options.config !== undefined ? cloneMcpConfig(options.config) : undefined;
    return function mcpAdapter(pi: ExtensionAPI) {
      installMcpAdapter(pi, {
++      ...(options.resolveSessionConfig !== undefined ? { resolveSessionConfig: options.resolveSessionConfig } : {}),
 +      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
        ...(options.configPath !== undefined ? { configPath: options.configPath } : {}),
        ...(factoryConfig !== undefined ? { config: cloneMcpConfig(factoryConfig) } : {}),
      });
 --- a/types.ts
 +++ b/types.ts
-@@ -624,6 +624,8 @@
+@@ -624,6 +624,12 @@
  }
  
  export interface McpAdapterOptions {
++  /** Agentic: isolated config, freshly authorized after previous session teardown.
++   * Requires config to select upstream's programmatic (no ambient reads) mode.
++   */
++  resolveSessionConfig?: (ctx: import("@earendil-works/pi-coding-agent").ExtensionContext) => McpConfig;
 +  /** Agentic: initial config discovery follows the session cwd. */
 +  cwd?: string;
    config?: McpConfig;

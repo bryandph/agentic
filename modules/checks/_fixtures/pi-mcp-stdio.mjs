@@ -2,7 +2,7 @@
 import {createInterface} from 'node:readline';
 import {appendFileSync} from 'node:fs';
 const name = process.argv[2];
-appendFileSync(process.env.MCP_FIXTURE_EVENTS, JSON.stringify({name, cwd: process.cwd(), event: 'start'}) + '\n');
+appendFileSync(process.env.MCP_FIXTURE_EVENTS, JSON.stringify({name, cwd: process.cwd(), pid: process.pid, event: 'start'}) + '\n');
 for await (const line of createInterface({input: process.stdin})) {
   const request = JSON.parse(line);
   if (request.id === undefined) continue;

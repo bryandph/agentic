@@ -50,7 +50,8 @@ packaged. The registry supplies absolute Nix-store stdio wrappers; managed
 server delivery uses no npx, runtime npm fetch, or imperative installer.
 
 The small committed patch adds a global-only config loader, makes early config
-discovery follow session cwd, disables load-time background initialization, and
+discovery follow session cwd, refreshes the trust-filtered snapshot on every
+session start, disables load-time background initialization, and
 suppresses resolved URL/header bytes in invalid-value errors. The Pi manifest
 selects the trust wrapper; upstream entry/exports remain available to explicit
 SDK consumers and are not themselves a project-trust boundary.
@@ -59,7 +60,11 @@ SDK consumers and are not themselves a project-trust boundary.
 
 Upstream reads project MCP automatically and can start eager servers during
 extension load. A global extension does not inherit Pi's project-resource guard.
-The packaged entry delays the upstream factory until `session_start`.
+The packaged entry registers against a global-only snapshot. After stopping the
+previous session runtime, every `session_start` reevaluates trust for the new
+context cwd and replaces the snapshot before initializing servers. This also
+covers SDK hosts that retain the extension instance across session switches;
+previous project tools are deactivated before loading the next snapshot.
 
 For native Pi trust resources it uses `ctx.isProjectTrusted()`, including
 session-only and CLI decisions. Pi 0.85.1 treats a directory containing only
@@ -75,8 +80,10 @@ Without project trust, the wrapper supplies an isolated snapshot of shared
 global tiers and Pi global overrides. Project configs, compatibility imports,
 plugin/package MCP discovery, and `--mcp-config` are excluded. User-tier servers
 remain available, including user-declared commands running in the session cwd.
-Upstream isolated-config mode disables setup/config-edit panels and enable/
-disable commands here, preventing project access through those commands.
+Both trusted and untrusted sessions use upstream isolated-config mode, which
+disables setup/config-edit panels and enable/disable commands. Edit the mutable
+Pi override files and restart/reload instead. This prevents ambient project
+access through configuration commands and keeps trust selection session scoped.
 This is an input-loading guard, not an OS sandbox for user-approved global
 servers or Pi tools.
 
@@ -92,7 +99,7 @@ Trusted sessions keep upstream field-wise merge order (later wins):
 Project discovery uses exact session cwd, without searching ancestor `.mcp.json`
 files. Changing an HTTP URL strips inherited auth fields; changing transport
 strips incompatible inherited fields. Mutable Pi overrides preserve shared
-files, including enable/disable operations. Explicit compatibility imports
+files; set server `disabled` in the mutable override file when needed. Explicit compatibility imports
 retain upstream behavior in trusted sessions.
 
 ## Interpolation, lifecycle, and discovery
@@ -145,7 +152,10 @@ nix run .#pi-mcp-runtime-check -- /absolute/path/to/pi
 The runtime app uses an isolated temporary home, fake credentials, local HTTP,
 and pinned stdio fixtures. It tests actual Pi loading/host peers, effective
 merged server sets, interpolation, proxy calls, cwd, cold/warm/eager lifecycle,
-trust allow/deny/parent/CLI cases, and credential-free artifacts. No model/API
+trust allow/deny/parent/CLI cases, and credential-free artifacts. Retained-instance
+tests alternate trusted and denied cwd contexts with real upstream handlers and
+proxy calls, both with and without intervening shutdown. RPC tests exercise
+actual session switching and new sessions within one Pi process. No model/API
 calls or real credential-store access are needed. The Nix check evaluates the
 real exported HM adapter with destination-option stubs; the consuming environment
 must also evaluate its full Home Manager configuration.

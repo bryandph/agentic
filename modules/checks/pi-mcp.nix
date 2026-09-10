@@ -84,9 +84,13 @@
       lib.replaceStrings ["@adapter@" "@user@" "@project@"] ["${adapter}" "${user}" "${project}"]
       (builtins.readFile ./_fixtures/pi-mcp-runtime.ts)
     );
+    sessionExtension = pkgs.writeText "pi-mcp-session-switch.ts" (
+      lib.replaceStrings ["@adapter@"] ["${adapter}"]
+      (builtins.readFile ./_fixtures/pi-mcp-session-switch.ts)
+    );
     runner = pkgs.writeText "pi-mcp-runtime-runner.py" (
-      lib.replaceStrings ["@adapter@" "@extension@" "@user@" "@project@"]
-      ["${adapter}" "${runtimeExtension}" "${user}" "${project}"]
+      lib.replaceStrings ["@adapter@" "@extension@" "@user@" "@project@" "@sessionExtension@"]
+      ["${adapter}" "${runtimeExtension}" "${user}" "${project}" "${sessionExtension}"]
       (builtins.readFile ./_fixtures/pi-mcp-runtime-runner.py)
     );
   in {
