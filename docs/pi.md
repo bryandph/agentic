@@ -9,10 +9,13 @@
   or put an npm/git source in the managed package entry.
 - Core `homeModules.default` and the consumer's wired `homeModules.agentic` /
   `flake.modules.homeManager.agentic` expose
-  `agentic.mcp.sharedUserConfig.enable` (default `false`). Enabled, HM owns only
-  `~/.config/mcp/mcp.json`, rendered from final `programs.mcp.servers`.
-  The existing `agentic.mcp.userServers` bridge is unchanged. This literal path
-  matches upstream; it intentionally does not follow `XDG_CONFIG_HOME`.
+  `agentic.mcp.sharedUserConfig.enable` (default `false`). Enabled, it defaults
+  `programs.mcp.enable` to `true` and reuses native HM delivery when its enabled
+  XDG file targets `~/.config/mcp/mcp.json`. There is only one writer per target.
+  With custom XDG placement or a disabled native writer, a fallback at Pi's
+  literal shared path reuses upstream serialization of final `programs.mcp.servers`.
+  The existing `agentic.mcp.userServers` bridge is unchanged; the option does not
+  disable native MCP integration or change the consumer's XDG configuration.
 - Project delivery reuses `.mcp.json` from the existing registry renderer and
   devenv bootstrap. No new flavor or server list.
 - Consumers importing `flakeModules.default` get
@@ -145,7 +148,8 @@ Serena entry or large global direct-tools list.
 ```sh
 nix build .#pi-mcp-adapter .#checks.aarch64-darwin.pi-mcp \
   .#checks.aarch64-darwin.agents-registry .#checks.aarch64-darwin.serena \
-  .#checks.aarch64-darwin.adapters .#checks.aarch64-darwin.org-neutral
+  .#checks.aarch64-darwin.adapters .#checks.aarch64-darwin.org-neutral \
+  .#checks.aarch64-darwin.pi-mcp-hm
 nix run .#pi-mcp-runtime-check -- /absolute/path/to/pi
 ```
 
@@ -157,8 +161,11 @@ tests alternate trusted and denied cwd contexts with real upstream handlers and
 proxy calls, both with and without intervening shutdown. RPC tests exercise
 actual session switching and new sessions within one Pi process. No model/API
 calls or real credential-store access are needed. The Nix check evaluates the
-real exported HM adapter with destination-option stubs; the consuming environment
-must also evaluate its full Home Manager configuration.
+real exported HM adapter against test-pinned Home Manager 26.05, including its
+native MCP writer, assertions and final home-file target uniqueness. Normal,
+custom-XDG, retargeted, disabled-writer, empty-registry and opt-out cases are
+covered. The test builds HM home-files; it never activates a configuration.
+Consumers still own their production Home Manager version and full configuration.
 
 Validation covers aarch64-darwin and Pi 0.85.1. Linux/native keyring operation,
 real OAuth, and live fleet MCP sessions need environment-level verification;

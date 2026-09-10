@@ -53,33 +53,17 @@
           }
         ];
       }).config;
-    # Core does not pin HM. Evaluate its real exported module with only the
-    # two HM destination options stubbed; upstream bridge/rendering is real.
-    hm =
-      (lib.evalModules {
-        specialArgs = {inherit pkgs;};
-        modules = [
-          config.flake.homeModules.default
-          ({lib, ...}: {
-            options.home.file = lib.mkOption {
-              type = lib.types.attrsOf lib.types.anything;
-              default = {};
-            };
-            options.programs.mcp.servers = lib.mkOption {
-              type = lib.types.attrsOf lib.types.anything;
-              default = {};
-            };
-            config.agentic.mcp.userServers = registry.agentic.mcp.lib.renderTier pkgs "user";
-            config.agentic.mcp.sharedUserConfig.enable = true;
-          })
-        ];
-      }).config;
+    hm = import ./_fixtures/pi-mcp-hm.nix {
+      inherit pkgs;
+      coreModule = config.flake.homeModules.default;
+      userServers = registry.agentic.mcp.lib.renderTier pkgs "user";
+    };
     project =
       ((import "${inputs.mcp-servers-nix}/lib").evalModule pkgs {
         flavor = "claude-code";
         settings.servers = registry.agentic.mcp.lib.renderTier pkgs "project";
       }).config.configFile;
-    user = pkgs.writeText "pi-shared-user-mcp.json" hm.home.file.".config/mcp/mcp.json".text;
+    user = hm.user;
     runtimeExtension = pkgs.writeText "pi-mcp-runtime.ts" (
       lib.replaceStrings ["@adapter@" "@user@" "@project@"] ["${adapter}" "${user}" "${project}"]
       (builtins.readFile ./_fixtures/pi-mcp-runtime.ts)
@@ -94,6 +78,14 @@
       (builtins.readFile ./_fixtures/pi-mcp-runtime-runner.py)
     );
   in {
+    checks.pi-mcp-hm = assert hm.valid;
+      pkgs.runCommand "pi-mcp-hm-targets" {nativeBuildInputs = [pkgs.jq];} ''
+        for files in ${lib.escapeShellArgs (map toString hm.homeFiles)}; do
+          test -e "$files/.config/mcp/mcp.json"
+        done
+        jq -e '.mcpServers == {}' ${hm.emptyUser} >/dev/null
+        touch "$out"
+      '';
     checks.pi-mcp = pkgs.runCommand "pi-mcp-config-parity" {nativeBuildInputs = [pkgs.nodejs];} ''
       export HOME="$TMPDIR/home"
       export PI_CODING_AGENT_DIR="$HOME/.pi/agent"

@@ -19,8 +19,39 @@
   baseModule = {
     config,
     lib,
+    pkgs,
     ...
-  }: {
+  }: let
+    sharedPath = "${config.home.homeDirectory}/.config/mcp/mcp.json";
+    native = config.xdg.configFile."mcp/mcp.json" or null;
+    # HM file targets are home-relative unless outside the home directory.
+    nativePath =
+      if native == null
+      then null
+      else
+        toString (/.
+          + (
+            if lib.hasPrefix "/" native.target
+            then native.target
+            else "${config.home.homeDirectory}/${native.target}"
+          ));
+    nativeDeliversShared = native != null && native.enable && nativePath == sharedPath;
+    # Reuse upstream's serialization, including null/default-field removal and
+    # environment references. Do not emit raw HM options.
+    source =
+      if native != null
+      then native.source
+      else
+        (pkgs.formats.json {}).generate "mcp.json" {
+          mcpServers = lib.mapAttrs (_: server:
+            lib.hm.mcp.transformMcpServer {
+              inherit server;
+              extraTransforms = [lib.hm.mcp.addType];
+              exclude = ["serverUrl"];
+            })
+          config.programs.mcp.servers;
+        };
+  in {
     imports = [inputs.mcp-servers-nix.homeManagerModules.default];
 
     options.agentic.mcp.sharedUserConfig.enable = lib.mkEnableOption "shared user MCP delivery to ~/.config/mcp/mcp.json (including Pi)";
@@ -37,11 +68,15 @@
 
     config = {
       mcp-servers.settings.servers = config.agentic.mcp.userServers;
-      # Upstream Pi deliberately uses this literal shared path, not XDG_CONFIG_HOME.
-      # Keep the Pi-owned override files writable and outside HM ownership.
-      home.file.".config/mcp/mcp.json" = lib.mkIf config.agentic.mcp.sharedUserConfig.enable {
-        text = builtins.toJSON {mcpServers = config.programs.mcp.servers;};
-      };
+      # Prefer HM's native writer. A consumer can still explicitly disable it.
+      programs.mcp.enable = lib.mkIf config.agentic.mcp.sharedUserConfig.enable (lib.mkDefault true);
+      # Pi deliberately uses this literal path, not XDG_CONFIG_HOME. Add one
+      # fallback only when the upstream file does not already land here.
+      home.file.".config/mcp/mcp.json" =
+        lib.mkIf
+        (config.agentic.mcp.sharedUserConfig.enable && !nativeDeliversShared) {
+          inherit source;
+        };
     };
   };
 in {
