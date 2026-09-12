@@ -7,6 +7,7 @@
   nodejs,
   keyutils,
   procps,
+  zlib,
   ...
 }:
 buildNpmPackage {
@@ -22,7 +23,10 @@ buildNpmPackage {
   dontNpmBuild = true;
   patches = [./integration.patch];
   nativeBuildInputs = lib.optionals stdenv.hostPlatform.isLinux [autoPatchelfHook];
-  buildInputs = lib.optionals stdenv.hostPlatform.isLinux [stdenv.cc.cc.lib];
+  buildInputs = lib.optionals stdenv.hostPlatform.isLinux [
+    stdenv.cc.cc.lib
+    zlib
+  ];
   postPatch = ''
     cp ${./package.json} package.json
     cp ${./package-lock.json} package-lock.json
