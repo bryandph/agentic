@@ -40,6 +40,7 @@
               }
               // lib.optionalAttrs (flavor == "opencode") {
                 "$schema" = "https://opencode.ai/config.json";
+                mcp = config.agentic.mcp.lib.openCodeOAuth pkgs "project";
               };
           }
         );

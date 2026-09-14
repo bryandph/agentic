@@ -32,6 +32,12 @@
           then acfg.mcp.lib.renderCodexTier pkgs "project"
           else acfg.mcp.lib.renderTier pkgs "project";
       }
+      // lib.optionalAttrs (flavor == "opencode") {
+        settings = {
+          servers = acfg.mcp.lib.renderTier pkgs "project";
+          mcp = acfg.mcp.lib.openCodeOAuth pkgs "project";
+        };
+      }
       // lib.optionalAttrs (flavor == "codex") {
         format = "toml";
         fileName = "config.toml";
@@ -54,6 +60,7 @@
         enable = true;
         settings = {
           "$schema" = "https://opencode.ai/config.json";
+          mcp = acfg.mcp.lib.openCodeOAuth pkgs "project";
           servers = acfg.mcp.lib.renderTier pkgs "project";
         };
       };

@@ -68,6 +68,11 @@
 
     config = {
       mcp-servers.settings.servers = config.agentic.mcp.userServers;
+      # Preserve public enrollment metadata across the upstream HM bridge.
+      programs.mcp.servers =
+        lib.mapAttrs (_: server: {inherit (server) oauth;})
+        (lib.filterAttrs (_: server: (server.oauth or null) != null)
+          config.agentic.mcp.userServers);
       # Prefer HM's native writer. A consumer can still explicitly disable it.
       programs.mcp.enable = lib.mkIf config.agentic.mcp.sharedUserConfig.enable (lib.mkDefault true);
       # Pi deliberately uses this literal path, not XDG_CONFIG_HOME. Add one

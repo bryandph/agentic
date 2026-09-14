@@ -55,7 +55,13 @@
 
             plain = {
               tiers = ["user" "project"];
-              command = pkgs: "${pkgs.hello}/bin/hello";
+              type = "http";
+              url = "https://tools.fixture.example/mcp";
+              oauth = {
+                clientId = "fixture-tools";
+                scopes = ["openid" "offline_access"];
+                callbackPort = 33419;
+              };
             };
 
             adhoc.external = true;
@@ -67,6 +73,9 @@
             userTier = builtins.attrNames (config.agentic.mcp.lib.serversForTier "user");
             projectTier = builtins.attrNames (config.agentic.mcp.lib.serversForTier "project");
             httpSecretVars = builtins.attrNames config.agentic.mcp.lib.httpSecretRefs;
+            oauthClaude = (config.agentic.mcp.lib.renderTier pkgs "project").plain.oauth;
+            oauthCodex = (config.agentic.mcp.lib.renderCodexTier pkgs "project").plain.oauth;
+            oauthOpenCode = (config.agentic.mcp.lib.openCodeOAuth pkgs "project").plain.oauth;
             validOk = config.agentic.mcp.lib.validateAgentRefs "fixture-agent" ["forge"];
             externalOk = config.agentic.mcp.lib.validateAgentRefs "fixture-agent" ["adhoc"];
             missingFails =
@@ -98,6 +107,22 @@
     assert p.validOk == ["forge"];
     assert p.externalOk == ["adhoc"];
     assert p.missingFails;
+    assert p.oauthClaude
+    == {
+      clientId = "fixture-tools";
+      scopes = "openid offline_access";
+      callbackPort = 33419;
+    };
+    assert p.oauthCodex
+    == {
+      client_id = "fixture-tools";
+      scopes = ["openid" "offline_access"];
+    };
+    assert p.oauthOpenCode
+    == {
+      clientId = "fixture-tools";
+      scope = "openid offline_access";
+    };
       pkgs.runCommand "agentic-mcp-registry" {
         nativeBuildInputs = [pkgs.gnugrep pkgs.jq];
       } ''

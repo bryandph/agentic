@@ -79,6 +79,29 @@
         '';
       };
 
+      oauth = lib.mkOption {
+        type = lib.types.nullOr (lib.types.submodule {
+          options = {
+            clientId = lib.mkOption {
+              type = lib.types.str;
+              description = "Public OAuth client ID; credentials stay in the client's native storage.";
+            };
+            scopes = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [];
+              description = "OAuth scopes requested by interactive clients.";
+            };
+            callbackPort = lib.mkOption {
+              type = lib.types.nullOr lib.types.port;
+              default = null;
+              description = "Optional loopback callback port for Claude Code.";
+            };
+          };
+        });
+        default = null;
+        description = "HTTP public-client OAuth enrollment metadata, without credentials.";
+      };
+
       secrets = lib.mkOption {
         type = lib.types.attrsOf config.agentic.secrets.refType;
         default = {};
@@ -142,6 +165,12 @@
           else throw "agentic.mcp.servers.${name}: http server requires `url`";
       }
       // lib.optionalAttrs (def.headers != {}) {inherit (def) headers;}
+      // lib.optionalAttrs (def.oauth != null) {
+        oauth =
+          {inherit (def.oauth) clientId;}
+          // lib.optionalAttrs (def.oauth.scopes != []) {scopes = lib.concatStringsSep " " def.oauth.scopes;}
+          // lib.optionalAttrs (def.oauth.callbackPort != null) {inherit (def.oauth) callbackPort;};
+      }
     else let
       bin =
         if def.command != null
@@ -190,6 +219,13 @@
     // lib.optionalAttrs ((server.args or []) != []) {inherit (server) args;}
     // lib.optionalAttrs ((server.env or {}) != {}) {inherit (server) env;}
     // lib.optionalAttrs ((server.url or null) != null) {inherit (server) url;}
+    // lib.optionalAttrs ((server.oauth or null) != null) {
+      oauth =
+        {client_id = server.oauth.clientId;}
+        // lib.optionalAttrs ((server.oauth.scopes or "") != "") {
+          scopes = lib.splitString " " server.oauth.scopes;
+        };
+    }
     // lib.optionalAttrs (staticHeaders != {}) {http_headers = staticHeaders;}
     // lib.optionalAttrs (envHeaders != {}) {
       env_http_headers = lib.mapAttrs (_: value: builtins.elemAt (envHeader value) 0) envHeaders;
@@ -218,6 +254,19 @@ in {
 
   config.agentic.mcp.lib = {
     inherit render;
+    # Upstream's OpenCode transport mapper drops OAuth metadata. Its extra
+    # configuration merges after that mapper, so preserve only these fields.
+    openCodeOAuth = pkgs: tier:
+      lib.mapAttrs (_: server: {
+        oauth =
+          {
+            clientId = server.oauth.clientId;
+          }
+          // lib.optionalAttrs ((server.oauth.scopes or "") != "") {
+            scope = server.oauth.scopes;
+          };
+      }) (lib.filterAttrs (_: server: (server.oauth or null) != null)
+        (cfg.lib.renderTier pkgs tier));
 
     serversForTier = tier: lib.filterAttrs (_: s: lib.elem tier s.tiers) deliverable;
 
