@@ -70,13 +70,7 @@
   bootstrapScript = pkgs: ''
     # agentic bootstrap — idempotent; re-entry changes nothing when
     # inputs are unchanged.
-    mkdir -p .claude .opencode
-    # Replace leftover real (empty) dirs from pre-generated layouts,
-    # then point the agent dirs at the rendered farms.
-    [ -d .claude/agents ] && [ ! -L .claude/agents ] && rmdir .claude/agents 2>/dev/null || true
-    [ -d .opencode/agents ] && [ ! -L .opencode/agents ] && rmdir .opencode/agents 2>/dev/null || true
-    ln -sfn ${acfg.agentsLib.claudeAgentsDir pkgs} .claude/agents
-    ln -sfn ${acfg.agentsLib.opencodeAgentsDir pkgs} .opencode/agents
+    ${acfg.agentsLib.placeScript pkgs}
     # Knowledge memory plane: generated namespace + project.yml.
     ${acfg.memoryPlane.lib.placeScript pkgs}
     # Generated workmux config — a real file (not a symlink): workmux

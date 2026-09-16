@@ -83,13 +83,43 @@
         description = "Required MCP servers (validated against the registry; external entries warn).";
       };
 
-      claude.extraTools = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [];
-        description = "Per-platform override: extra Claude tool grants on top of the derived set.";
+      claude = {
+        extraTools = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          description = "Per-platform override: extra Claude tool grants on top of the derived set.";
+        };
+        model = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Claude model alias or ID; null preserves harness model selection.";
+        };
+        maxTurns = lib.mkOption {
+          type = lib.types.nullOr lib.types.ints.positive;
+          default = null;
+          description = "Native Claude subagent turn limit; null preserves the harness default.";
+        };
+      };
+
+      codex = {
+        model = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Codex model ID; null preserves harness model selection.";
+        };
+        reasoningEffort = lib.mkOption {
+          type = lib.types.nullOr (lib.types.enum ["minimal" "low" "medium" "high" "xhigh" "max" "ultra"]);
+          default = null;
+          description = "Native reasoning effort; choose a value supported by the selected model.";
+        };
       };
 
       opencode = {
+        model = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "OpenCode provider/model ID; null preserves harness model selection.";
+        };
         mode = lib.mkOption {
           type = lib.types.str;
           default = "subagent";
@@ -169,20 +199,29 @@
   renderClaude = name: agent: ''
     ---
     name: ${name}
-    description: ${agent.description}
+    description: ${builtins.toJSON agent.description}
     tools: ${lib.concatStringsSep ", " (lib.unique (claudeTools agent))}
-    ---
+    ${lib.optionalString (agent.claude.model != null) "model: ${builtins.toJSON agent.claude.model}\n"}${lib.optionalString (agent.claude.maxTurns != null) "maxTurns: ${toString agent.claude.maxTurns}\n"}---
 
     ${compileBody name agent}'';
 
   renderOpencode = name: agent: ''
     ---
-    description: ${agent.description}
+    description: ${builtins.toJSON agent.description}
     mode: ${agent.opencode.mode}
     permission: ${builtins.toJSON (opencodePermission agent)}
-    ---
+    ${lib.optionalString (agent.opencode.model != null) "model: ${builtins.toJSON agent.opencode.model}\n"}---
 
     ${compileBody name agent}'';
+
+  # JSON strings are valid TOML basic strings. Keep model/authentication
+  # routing separate: a role never chooses credentials or a provider.
+  renderCodex = name: agent: ''
+    name = ${builtins.toJSON name}
+    description = ${builtins.toJSON agent.description}
+    developer_instructions = ${builtins.toJSON (compileBody name agent)}
+    ${lib.optionalString (agent.codex.model != null) "model = ${builtins.toJSON agent.codex.model}\n"}${lib.optionalString (agent.codex.reasoningEffort != null) "model_reasoning_effort = ${builtins.toJSON agent.codex.reasoningEffort}\n"}
+  '';
 
   renderPi = name: agent: ''
     ---
@@ -238,14 +277,48 @@
       cfg.agents
     );
 
-  agentsDir = render: farmName: pkgs:
+  agentsDir = render: extension: farmName: pkgs:
     pkgs.linkFarm farmName (
       lib.mapAttrsToList (n: agent: {
-        name = "${n}.md";
-        path = pkgs.writeText "${n}.md" (render n agent);
+        name = "${n}.${extension}";
+        path = pkgs.writeText "${n}.${extension}" (render n agent);
       })
       cfg.agents
     );
+
+  # Codex discovers symlinked files but opens role files with O_NOFOLLOW
+  # when spawning. The directory may be a symlink; its TOML entries must
+  # be regular files. A linkFarm therefore passes discovery but fails launch.
+  codexAgentsDir = pkgs:
+    pkgs.runCommand "codex-agents" {} ''
+      mkdir -p "$out"
+      ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: agent: ''
+          cp ${pkgs.writeText "${name}.toml" (renderCodex name agent)} "$out"/${lib.escapeShellArg "${name}.toml"}
+        '')
+        cfg.agents)}
+    '';
+
+  # Check every destination before changing any of them. Never nest a
+  # generated farm inside a user's real, nonempty agents directory.
+  placeScript = pkgs: ''
+    for agentic_dir in .claude/agents .codex/agents .opencode/agents; do
+      if [ -e "$agentic_dir" ] && [ ! -L "$agentic_dir" ]; then
+        if [ ! -d "$agentic_dir" ] || [ -n "$(ls -A "$agentic_dir")" ]; then
+          echo "agentic: refusing to replace unmanaged $agentic_dir; move its definitions into the Nix registry first" >&2
+          exit 1
+        fi
+      fi
+    done
+    mkdir -p .claude .codex .opencode
+    for agentic_dir in .claude/agents .codex/agents .opencode/agents; do
+      if [ -d "$agentic_dir" ] && [ ! -L "$agentic_dir" ]; then
+        rmdir "$agentic_dir"
+      fi
+    done
+    ln -sfn ${agentsDir renderClaude "md" "claude-agents" pkgs} .claude/agents
+    ln -sfn ${codexAgentsDir pkgs} .codex/agents
+    ln -sfn ${agentsDir renderOpencode "md" "opencode-agents" pkgs} .opencode/agents
+  '';
 in {
   options.agentic = {
     agents = lib.mkOption {
@@ -262,7 +335,9 @@ in {
         agent` (markdown strings), `claudeAgentsDir pkgs` /
         `opencodeAgentsDir pkgs` (link farms for
         .claude/agents / .opencode/agents), and the derivation
-        helpers `claudeTools` / `opencodePermission`. Pi: `renderPi`,
+        helpers `claudeTools` / `opencodePermission`. Codex: `renderCodex`,
+        `codexAgentsDir pkgs` (standalone .codex/agents/*.toml roles).
+        `placeScript pkgs` safely places project agent directories. Pi: `renderPi`,
         `piPackage pkgs` (local package of /role-<name> prompt templates),
         and `compileBody` (the shared body before platform framing).
       '';
@@ -270,8 +345,8 @@ in {
   };
 
   config.agentic.agentsLib = {
-    inherit compileBody renderClaude renderOpencode renderPi piPackage claudeTools opencodePermission;
-    claudeAgentsDir = agentsDir renderClaude "claude-agents";
-    opencodeAgentsDir = agentsDir renderOpencode "opencode-agents";
+    inherit compileBody renderClaude renderCodex renderOpencode renderPi piPackage claudeTools opencodePermission placeScript codexAgentsDir;
+    claudeAgentsDir = agentsDir renderClaude "md" "claude-agents";
+    opencodeAgentsDir = agentsDir renderOpencode "md" "opencode-agents";
   };
 }

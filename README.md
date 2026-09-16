@@ -52,6 +52,24 @@ specialist prompt templates compiled from the agent registry. See
 [Pi delivery](docs/pi.md) for the trust boundary, mutable-file ownership,
 package contract, and targeted runtime check.
 
+### Agent role projections
+
+`agentic.agents.<name>` composes knowledge fragments, scope, capabilities, and
+MCP requirements. Native model settings are optional: `claude.model` and
+`claude.maxTurns`, `codex.model`, `codex.reasoningEffort`, and
+`opencode.model`. Unset fields preserve harness defaults;
+model/provider availability and authentication remain the operator's concern.
+
+The project bootstrap places Claude and OpenCode Markdown agents and Codex
+standalone TOML agents. `nix run .#write-agent-roles` refreshes those directories
+without the rest of shell bootstrap. Nonempty unmanaged directories are refused
+rather than overwritten. Rendered farms are also available through
+`agentic.agentsLib.{claudeAgentsDir,codexAgentsDir,opencodeAgentsDir} pkgs`.
+Pi consumes the shared body as a prompt in its current session, not as a native
+subagent or automatic model switch. Codex roles inherit their parent's sandbox;
+capabilities are not a universal security boundary. Codex's launch-time reader
+rejects individual role symlinks, so its directory contains regular TOML files.
+
 ### CI cache profile contract
 
 Environment layers may define `agentic.ciCache.profiles.{nix,rust,python}`.

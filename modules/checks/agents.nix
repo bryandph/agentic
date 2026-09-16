@@ -27,7 +27,7 @@
 
       agentic.agents = {
         builder = {
-          description = "Fixture agent with full capabilities and overrides.";
+          description = ''Fixture: "quoted" description with full capabilities.'';
           fragments = ["fixture-conventions" "fixture-review"];
           scope = {
             paths = ["modules/"];
@@ -41,6 +41,13 @@
           };
           mcp = ["serena"];
           claude.extraTools = ["TaskCreate" "AskUserQuestion"];
+          claude.model = "haiku";
+          claude.maxTurns = 8;
+          codex = {
+            model = "fixture-small";
+            reasoningEffort = "low";
+          };
+          opencode.model = "fixture/small";
           opencode.permission.bash = "ask";
         };
 
@@ -61,13 +68,16 @@
 
       flake.agenticProbe = {
         builderClaude = config.agentic.agentsLib.renderClaude "builder" config.agentic.agents.builder;
+        builderCodex = builtins.fromTOML (config.agentic.agentsLib.renderCodex "builder" config.agentic.agents.builder);
         builderOpencode = config.agentic.agentsLib.renderOpencode "builder" config.agentic.agents.builder;
         builderPi = config.agentic.agentsLib.renderPi "builder" config.agentic.agents.builder;
         builderBody = config.agentic.agentsLib.compileBody "builder" config.agentic.agents.builder;
         reviewerPi = config.agentic.agentsLib.renderPi "reviewer" config.agentic.agents.reviewer;
         reviewerClaude = config.agentic.agentsLib.renderClaude "reviewer" config.agentic.agents.reviewer;
+        reviewerCodex = builtins.fromTOML (config.agentic.agentsLib.renderCodex "reviewer" config.agentic.agents.reviewer);
         reviewerOpencode = config.agentic.agentsLib.renderOpencode "reviewer" config.agentic.agents.reviewer;
         renderedFiles = config.agentic.instructions.lib.renderedFiles;
+        placeAgents = config.agentic.agentsLib.placeScript pkgs;
       };
     };
 
@@ -115,6 +125,16 @@
       assert lib.hasInfix "WebFetch" p.builderClaude;
       assert lib.hasInfix "mcp__serena" p.builderClaude;
       assert lib.hasInfix "TaskCreate, AskUserQuestion" p.builderClaude;
+      # Codex roles parse as native TOML and carry the exact shared body.
+      assert p.builderCodex.name == "builder";
+      assert p.builderCodex.developer_instructions == p.builderBody;
+      assert p.builderCodex.model == "fixture-small";
+      assert p.builderCodex.model_reasoning_effort == "low";
+      # The supported Codex role overrides inherit the parent's sandbox.
+      assert !(p.builderCodex ? sandbox_mode);
+      assert !(p.reviewerCodex ? model);
+      assert !(p.reviewerCodex ? model_reasoning_effort);
+      assert !(p.reviewerCodex ? sandbox_mode);
       # Restricted agent: no edit/exec/web grants derived.
       assert !lib.hasInfix "Edit" p.reviewerClaude;
       assert !lib.hasInfix "Bash" p.reviewerClaude;
@@ -149,7 +169,7 @@
       assert lib.hasInfix "CLI equivalents" p.renderedFiles."AGENTS.md";
       assert !lib.hasInfix "CLI equivalents" p.renderedFiles."sub/dir/AGENTS.md";
         pkgs.runCommand "agentic-agents-registry" {
-          nativeBuildInputs = [pkgs.gnugrep];
+          nativeBuildInputs = [pkgs.gnugrep (pkgs.python3.withPackages (ps: [ps.pyyaml]))];
         } ''
           set -euo pipefail
           cd "$TMPDIR"
@@ -177,6 +197,53 @@
           test -f "$roles/package.json"
           grep -qF 'Fixture conventions card' "$roles/prompts/role-builder.md"
           grep -qF 'Shell commands: not permitted' "$roles/prompts/role-reviewer.md"
+
+          # Real parsers catch quoting/newline errors in generated files.
+          mkdir placement
+          cd placement
+          ${fixture.apps.${system}.write-agent-roles.program}
+          ${p.placeAgents}
+          python - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+          import yaml
+
+          def frontmatter(path):
+              return yaml.safe_load(pathlib.Path(path).read_text().split('---', 2)[1])
+
+          claude = frontmatter('.claude/agents/builder.md')
+          opencode = frontmatter('.opencode/agents/builder.md')
+          codex = tomllib.loads(pathlib.Path('.codex/agents/builder.toml').read_text())
+          assert claude['description'] == codex['description'] == opencode['description']
+          assert claude['model'] == 'haiku'
+          assert claude['maxTurns'] == 8
+          assert opencode['model'] == 'fixture/small'
+          assert 'model' not in frontmatter('.claude/agents/reviewer.md')
+          assert 'model' not in frontmatter('.opencode/agents/reviewer.md')
+          assert set(p.stem for p in pathlib.Path('.codex/agents').glob('*.toml')) == {'builder', 'reviewer'}
+          # Match Codex's launch-time loader, not just its discovery parser.
+          # Directory symlinks are supported; final-component symlinks are not.
+          for path in pathlib.Path('.codex/agents').glob('*.toml'):
+              assert not path.is_symlink(), path
+              fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+              with os.fdopen(fd) as handle:
+                  assert tomllib.loads(handle.read())['name'] == path.stem
+          PY
+
+          # Collision refusal must leave user files and other destinations intact.
+          mkdir -p ../collision/.codex/agents
+          cd ../collision
+          echo 'keep me' > .codex/agents/personal.toml
+          if ( ${p.placeAgents} ); then
+            echo 'unmanaged agent directory unexpectedly replaced' >&2
+            exit 1
+          fi
+          test "$(cat .codex/agents/personal.toml)" = 'keep me'
+          test ! -e .claude
+          rm .codex/agents/personal.toml
+          ${p.placeAgents}
+          test -L .codex/agents
 
           touch $out
         '';
