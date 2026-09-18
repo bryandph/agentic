@@ -137,7 +137,7 @@
         [ "$(jq -r .env.FORGE_HOST "$rendered")" = "https://forge.fixture.example" ]
         wrapper=$(jq -r .command "$rendered")
         grep -qF "vault kv get '-mount=fixture-kv' '-field=token' fixture/forge" "$wrapper"
-        grep -qF 'export FORGE_TOKEN="$(' "$wrapper"
+        grep -qF 'FORGE_TOKEN="$(' "$wrapper"
 
         # Codex uses its native bearer-token field rather than carrying the
         # registry's Claude-shaped Authorization header through unchanged.

@@ -155,6 +155,27 @@
   render = pkgs: name: def:
     if def.external
     then throw "agentic.mcp.servers.${name} is external — it has no renderable delivery"
+    else if def.type == "http" && def.secrets != {} && cfg.httpSecretDelivery == "proxy"
+    then let
+      python = cfg.httpProxyPython pkgs;
+      settings = (pkgs.formats.json {}).generate "${name}-http-endpoint.json" {
+        inherit (def) url headers;
+      };
+      bridge = pkgs.writeShellScript "${name}-http-bridge" ''
+        unset PYTHONPATH
+        exec ${python}/bin/python ${./_http_bridge.py} ${settings}
+      '';
+      wrapped = secretsLib.wrapServer pkgs {
+        name = "${name}-mcp-wrapped";
+        bin = toString bridge;
+        inherit (def) secrets;
+      };
+    in
+      assert lib.assertMsg (def.oauth == null) "Secret-bearing HTTP proxies cannot also use client OAuth";
+      assert lib.assertMsg (def.url != null) "HTTP MCP bridge requires a URL"; {
+        type = "stdio";
+        command = "${wrapped}/bin/${name}-mcp-wrapped";
+      }
     else if def.type == "http"
     then
       {
@@ -235,6 +256,21 @@
     };
 in {
   options.agentic.mcp = {
+    httpSecretDelivery = lib.mkOption {
+      type = lib.types.enum ["environment" "proxy"];
+      default = "environment";
+      description = "Deliver HTTP credentials through client environment or an isolated stdio bridge.";
+    };
+    httpProxyPython = lib.mkOption {
+      type = lib.types.functionTo lib.types.package;
+      default = pkgs: pkgs.python3.withPackages (ps: [(ps.toPythonModule pkgs.mcp-proxy)]);
+      description = "Python environment containing pinned upstream mcp-proxy.";
+    };
+    projectServers = lib.mkOption {
+      type = lib.types.nullOr (lib.types.listOf lib.types.str);
+      default = null;
+      description = "Select project-tier servers from the shared registry; null selects every project server.";
+    };
     servers = lib.mkOption {
       type = lib.types.attrsOf serverType;
       default = {};
@@ -268,12 +304,24 @@ in {
       }) (lib.filterAttrs (_: server: (server.oauth or null) != null)
         (cfg.lib.renderTier pkgs tier));
 
-    serversForTier = tier: lib.filterAttrs (_: s: lib.elem tier s.tiers) deliverable;
+    serversForTier = tier: let
+      missing = lib.filter (name: !(cfg.servers ? ${name})) (
+        if cfg.projectServers == null
+        then []
+        else cfg.projectServers
+      );
+    in
+      assert lib.assertMsg (tier != "project" || cfg.projectServers == null || missing == [])
+      "Unknown project MCP selection";
+        lib.filterAttrs (name: s:
+          lib.elem tier s.tiers
+          && (tier != "project" || cfg.projectServers == null || lib.elem name cfg.projectServers))
+        deliverable;
 
     # Everything an adapter needs for one tier, rendered.
     renderTier = pkgs: tier:
       lib.mapAttrs (render pkgs)
-      (lib.filterAttrs (_: s: lib.elem tier s.tiers) deliverable);
+      (cfg.lib.serversForTier tier);
 
     # Codex's TOML schema names HTTP header fields differently from the
     # registry's Claude-shaped common representation. Keep that mapping in
@@ -281,7 +329,7 @@ in {
     renderCodexTier = pkgs: tier:
       lib.mapAttrs transformCodexServer (
         lib.mapAttrs (render pkgs)
-        (lib.filterAttrs (_: s: lib.elem tier s.tiers) deliverable)
+        (cfg.lib.serversForTier tier)
       );
 
     # Secret requirements of http servers (any tier) — the set the
@@ -289,7 +337,7 @@ in {
     httpSecretRefs = lib.foldlAttrs (
       acc: _: def:
         acc // def.secrets
-    ) {} (lib.filterAttrs (_: s: s.type == "http") deliverable);
+    ) {} (lib.filterAttrs (_: s: s.type == "http" && cfg.httpSecretDelivery == "environment") deliverable);
 
     # Servers reachable without MCP (Pi coverage): name -> CLI
     # invocation. Surfaced in generated docs so MCP-less harnesses

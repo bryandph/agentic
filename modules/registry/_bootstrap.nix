@@ -77,7 +77,11 @@
     # reads the main worktree's copy during merges, and the header
     # carries the operational rationale.
     install -m 644 ${acfg.workmuxLib.configFile pkgs} .workmux.yaml
-    # http-server secrets: exported client-side from the backend CLI.
+    ${lib.optionalString (acfg.secrets.backend == "secretspec" && acfg.secrets.managedEnvironment != []) ''
+      # Clear credentials inherited from shells created before scoped delivery.
+      unset ${lib.concatStringsSep " " acfg.secrets.managedEnvironment}
+    ''}
+    # Legacy HTTP delivery only; scoped bridges require no shell credentials.
     ${acfg.secrets.lib.exportsScript acfg.mcp.lib.httpSecretRefs}
   '';
 in {

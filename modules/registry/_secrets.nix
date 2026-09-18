@@ -30,7 +30,7 @@
   refType = lib.types.submodule ({name, ...}: {
     options = {
       env = lib.mkOption {
-        type = lib.types.str;
+        type = lib.types.strMatching "[A-Za-z_][A-Za-z0-9_]*";
         default = name;
         description = "Environment variable the secret is delivered as (defaults to the attr name).";
       };
@@ -42,6 +42,11 @@
         type = lib.types.str;
         description = "Field within the secret at `path`.";
       };
+      asPath = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Deliver this value through a private temporary file managed by SecretSpec.";
+      };
     };
   });
 
@@ -51,9 +56,35 @@
 
   # One `export VAR="$(cli …)"` line per requirement — shared by both
   # delivery shapes so they cannot drift.
-  exportLine = ref: ''export ${ref.env}="$(${lib.escapeShellArgs (selectedBackend.secretCommand ref)})"'';
+  exportLine = ref: ''
+    ${ref.env}="$(${lib.escapeShellArgs (selectedBackend.secretCommand ref)})" || exit 1
+    [ -n "$${ref.env}" ] || { echo "Missing required credential: ${ref.env}" >&2; exit 1; }
+    export ${ref.env}
+  '';
 in {
   options.agentic.secrets = {
+    scopes = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.attrsOf refType);
+      default = {};
+      description = "Named per-command credential requirements; values are resolved only at execution.";
+    };
+    managedEnvironment = lib.mkOption {
+      type = lib.types.listOf (lib.types.strMatching "[A-Za-z_][A-Za-z0-9_]*");
+      default = [];
+      description = "Additional legacy credential variable names to exclude from scoped child environments.";
+    };
+    secretspec = {
+      package = lib.mkOption {
+        type = lib.types.functionTo lib.types.package;
+        default = pkgs: pkgs.secretspec;
+        description = "SecretSpec package (0.20 or newer).";
+      };
+      provider = lib.mkOption {
+        type = lib.types.str;
+        default = "env";
+        description = "Provider URI; contains only routing information, never authentication bytes.";
+      };
+    };
     backend = lib.mkOption {
       type = lib.types.str;
       default = "env";
@@ -130,6 +161,10 @@ in {
 
   config.agentic.secrets = {
     backends = {
+      secretspec = {
+        package = cfg.secretspec.package;
+        secretCommand = _: throw "SecretSpec uses scoped command execution; use mkRunner or wrapServer instead of secretCommand.";
+      };
       # OpenBao/Vault kv — the wired backend. Address/mount are options
       # so no environment identity lands in core.
       vault = {
@@ -154,18 +189,96 @@ in {
 
       exportsScript = refs: lib.concatMapStringsSep "\n" exportLine (lib.attrValues refs);
 
+      # One manifest carries all known names so --scope also removes stale
+      # credentials inherited from an older shell. No provider is queried by Nix.
+      mkRunner = pkgs: {
+        name,
+        scopes ? cfg.scopes,
+      }: let
+        allScopes =
+          (lib.attrValues cfg.scopes)
+          ++ (lib.mapAttrsToList (_: server: server.secrets) config.agentic.mcp.servers)
+          ++ (lib.attrValues scopes);
+        refs = lib.foldl' (acc: scope:
+          lib.foldlAttrs (acc: key: ref: let
+            env = ref.env or key;
+          in
+            if acc ? ${env} && acc.${env} != ref
+            then throw "Conflicting secret references for ${env}"
+            else acc // {${env} = ref;})
+          acc
+          scope) {}
+        allScopes;
+        manifest = (pkgs.formats.toml {}).generate "${name}-secretspec.toml" {
+          project = {
+            name =
+              if config.agentic.memoryPlane.projectName == null
+              then "agentic"
+              else config.agentic.memoryPlane.projectName;
+            revision = "1.0";
+          };
+          profiles.default =
+            (lib.genAttrs cfg.managedEnvironment (_: {
+              description = "Legacy credential excluded from unselected scopes";
+              required = false;
+            }))
+            // lib.mapAttrs (env: ref: {
+              description = "Runtime credential ${env}";
+              required = true;
+              ref = {item = ref.path;} // lib.optionalAttrs (ref.field != "") {inherit (ref) field;};
+              as_path = ref.asPath or false;
+            })
+            refs;
+          scopes = lib.mapAttrs (_: scope: {
+            secrets = lib.mapAttrsToList (key: ref: ref.env or key) scope;
+          }) (lib.filterAttrs (_: scope: scope != {}) scopes);
+        };
+        package = cfg.secretspec.package pkgs;
+      in
+        assert lib.assertMsg (lib.any (scope: scope != {}) (lib.attrValues scopes)) "Scoped runner requires at least one nonempty scope";
+        assert lib.assertMsg (lib.versionAtLeast package.version "0.20") "Scoped delivery requires SecretSpec >= 0.20";
+          pkgs.writeShellScriptBin name ''
+            set -euo pipefail
+            if [ "$#" -lt 4 ] || [ "$1" != --scope ] || [ "$3" != -- ]; then
+              echo "usage: ${name} --scope NAME -- COMMAND [ARG...]" >&2
+              exit 2
+            fi
+            scope="$2"
+            shift 3
+            case "$scope" in
+              ${lib.concatMapStringsSep "|" lib.escapeShellArg (lib.attrNames (lib.filterAttrs (_: scope: scope != {}) scopes))}) ;;
+              *) echo "${name}: unknown credential scope" >&2; exit 2 ;;
+            esac
+            exec ${lib.getExe package} --file ${manifest} run \
+              --provider ${lib.escapeShellArg cfg.secretspec.provider} --profile default --scope "$scope" -- "$@"
+          '';
+
       wrapServer = pkgs: {
         name,
         bin,
         secrets,
         extraEnv ? {},
       }:
-        pkgs.writeScriptBin name ''
-          #!${pkgs.runtimeShell}
-          ${lib.concatStringsSep "\n" (lib.mapAttrsToList (var: val: "export ${var}=${lib.escapeShellArg val}") extraEnv)}
-          ${lib.concatMapStringsSep "\n" exportLine (lib.attrValues secrets)}
-          exec ${bin} "$@"
-        '';
+        if cfg.backend == "secretspec"
+        then let
+          runner = cfg.lib.mkRunner pkgs {
+            name = "${name}-secrets";
+            scopes.${name} = secrets;
+          };
+        in
+          pkgs.writeShellScriptBin name ''
+            set -euo pipefail
+            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (var: val: "export ${var}=${lib.escapeShellArg val}") extraEnv)}
+            exec ${runner}/bin/${name}-secrets --scope ${lib.escapeShellArg name} -- ${bin} "$@"
+          ''
+        else
+          pkgs.writeScriptBin name ''
+            #!${pkgs.runtimeShell}
+            set -eu
+            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (var: val: "export ${var}=${lib.escapeShellArg val}") extraEnv)}
+            ${lib.concatMapStringsSep "\n" exportLine (lib.attrValues secrets)}
+            exec ${bin} "$@"
+          '';
     };
   };
 }

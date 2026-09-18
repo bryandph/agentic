@@ -99,21 +99,30 @@
         wrapper=${artifact vaultFixture "fixture-wrapped"}/bin/fixture-mcp
         expect 'VAULT_ADDR=https://vault.fixture.example:8200' "$wrapper"
         expect "vault kv get '-mount=fixture-kv' '-field=token' fixture/service" "$wrapper"
-        expect 'export FIXTURE_TOKEN="$(' "$wrapper"
+        expect 'FIXTURE_TOKEN="$(' "$wrapper"
+        expect '|| exit 1' "$wrapper"
         expect 'export FIXTURE_HOST=https://forge.fixture.example' "$wrapper"
         expect 'exec' "$wrapper"
 
         # http delivery: same backend, client-side ''${VAR} expansion —
         # the exports script carries the CLI invocation, never a value.
         exports=${artifact vaultFixture "fixture-exports"}
-        expect 'export FIXTURE_API_KEY="$(' "$exports"
+        expect 'FIXTURE_API_KEY="$(' "$exports"
         expect "vault kv get '-mount=fixture-kv' '-field=key' fixture/api" "$exports"
 
         # env backend: degenerate passthrough re-exports from the ambient
         # environment; no vault invocation may remain.
         envwrapper=${artifact envFixture "fixture-wrapped"}/bin/fixture-mcp
-        expect 'export FIXTURE_TOKEN="$(printenv FIXTURE_TOKEN)"' "$envwrapper"
+        expect 'FIXTURE_TOKEN="$(printenv FIXTURE_TOKEN)"' "$envwrapper"
         forbid 'vault' "$envwrapper"
+        # Missing runtime credentials must stop before the wrapped command.
+        if env -u FIXTURE_TOKEN -u FIXTURE_API_KEY "$envwrapper" > missing-output 2>/dev/null; then
+          echo "missing credential incorrectly launched the server" >&2
+          exit 1
+        fi
+        test ! -s missing-output
+        FIXTURE_TOKEN=fixture-token FIXTURE_API_KEY=fixture-key "$envwrapper" > present-output
+        grep -qF 'Hello, world!' present-output
 
         # consumer-defined preset: resolution goes through the op CLI with
         # zero core changes.

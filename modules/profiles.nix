@@ -8,7 +8,7 @@
 # Static core-eval publications (no consumer registry closure needed);
 # exports.nix aliases them as devenvModules.{rust,python,polyglot,
 # embedded-rust}.
-{lib, ...}: let
+_: let
   rust = {pkgs, ...}: {
     packages = with pkgs; [
       openssl
@@ -31,8 +31,6 @@
       clippy.enable = true;
       rustfmt.enable = true;
     };
-
-    containers = lib.mkForce {};
   };
 
   python = {pkgs, ...}: {
@@ -59,8 +57,6 @@
       ruff-format.enable = true;
       uv-check.enable = true;
     };
-
-    containers = lib.mkForce {};
   };
 
   polyglot = {
@@ -93,8 +89,6 @@
       clippy.enable = true;
       rustfmt.enable = true;
     };
-
-    containers = lib.mkForce {};
   };
 in {
   # Core's own namespace (aliased by exports.nix as devenvModules.*)…
