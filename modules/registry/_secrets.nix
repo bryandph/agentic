@@ -251,7 +251,8 @@ in {
             esac
             exec ${lib.getExe package} --file ${manifest} run \
               --provider ${lib.escapeShellArg cfg.secretspec.provider} --profile default \
-              --reason "Start ${name} for the agentic environment" --scope "$scope" -- "$@"
+              --reason "''${SECRETSPEC_REASON:-Start ${name} for the agentic environment}" \
+              --scope "$scope" -- "$@"
           '';
 
       wrapServer = pkgs: {
