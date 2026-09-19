@@ -250,7 +250,8 @@ in {
               *) echo "${name}: unknown credential scope" >&2; exit 2 ;;
             esac
             exec ${lib.getExe package} --file ${manifest} run \
-              --provider ${lib.escapeShellArg cfg.secretspec.provider} --profile default --scope "$scope" -- "$@"
+              --provider ${lib.escapeShellArg cfg.secretspec.provider} --profile default \
+              --reason "Start ${name} for the agentic environment" --scope "$scope" -- "$@"
           '';
 
       wrapServer = pkgs: {

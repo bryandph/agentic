@@ -32,8 +32,42 @@ def main():
             config = json.load(handle)
         headers = resolve_headers(config["headers"], os.environ)
         asyncio.run(run_streamablehttp_client(config["url"], headers=headers))
-    except Exception:
-        print("MCP HTTP bridge failed; check authentication and endpoint availability", file=sys.stderr)
+    except Exception as exc:
+        # Error strings can contain request headers. Log only exception classes
+        # and HTTP status codes so startup failures remain diagnosable.
+        def describe(error):
+            if isinstance(error, BaseExceptionGroup):
+                return ",".join(describe(child) for child in error.exceptions)
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            code = getattr(error, "errno", None)
+            detail = type(error).__name__
+            if isinstance(status, int):
+                detail += f"({status})"
+            if isinstance(code, int):
+                detail += f"(errno={code})"
+            message = str(error).lower()
+            if any(word in message for word in ("nodename", "name or service", "dns", "resolve", "host")):
+                detail += "(dns)"
+            elif "refused" in message:
+                detail += "(refused)"
+            elif "timed out" in message or "timeout" in message:
+                detail += "(timeout)"
+            elif "permission" in message or "operation not permitted" in message:
+                detail += "(permission)"
+            elif "unreachable" in message:
+                detail += "(unreachable)"
+            elif "certificate" in message or "ssl" in message:
+                detail += "(tls)"
+            elif "proxy" in message:
+                detail += "(proxy)"
+            elif "all connection attempts" in message:
+                detail += "(all-attempts)"
+            if error.__cause__ is not None:
+                detail += ">" + describe(error.__cause__)
+            return detail
+
+        detail = describe(exc)
+        print(f"MCP HTTP bridge failed: {detail}", file=sys.stderr)
         return 1
     return 0
 

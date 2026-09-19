@@ -169,6 +169,7 @@
         name = "${name}-mcp-wrapped";
         bin = toString bridge;
         inherit (def) secrets;
+        extraEnv = def.env;
       };
     in
       assert lib.assertMsg (def.oauth == null) "Secret-bearing HTTP proxies cannot also use client OAuth";
