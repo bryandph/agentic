@@ -37,6 +37,7 @@ in {
   };
 
   imports = [
+    (lib.mkAliasOptionModule ["workbench"] ["agentic"])
     ./modules/registry/_secrets.nix
     ./modules/registry/_mcp.nix
     ./modules/registry/_forges.nix

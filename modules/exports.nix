@@ -25,16 +25,21 @@
     flake.agentic.imports = [inputs.flake-parts.flakeModules.modules];
     homeManager.agentic = {};
     devenv.agentic = {};
+    flake.workbench = config.flake.modules.flake.agentic;
+    homeManager.workbench = config.flake.modules.homeManager.agentic;
+    devenv.workbench = config.flake.modules.devenv.agentic;
   };
 
   flake = {
     flakeModules = {
       agentic = config.flake.modules.flake.agentic;
+      workbench = config.flake.modules.flake.workbench;
       default = config.flake.modules.flake.agentic;
     };
 
     devenvModules = {
       agentic = config.flake.modules.devenv.agentic;
+      workbench = config.flake.modules.devenv.workbench;
       default = config.flake.modules.devenv.agentic;
       # Org-neutral language profiles (D8) — composable alongside the
       # agentic module; they never own a repo's packaging.
@@ -43,6 +48,7 @@
 
     homeModules = {
       agentic = config.flake.modules.homeManager.agentic;
+      workbench = config.flake.modules.homeManager.workbench;
       default = config.flake.modules.homeManager.agentic;
     };
   };

@@ -37,12 +37,20 @@ Internals are dendritic (every file under `modules/` is a flake-parts
 module, auto-imported via import-tree; `_`-prefixed paths are skipped).
 Consumers do **not** need any of that — the supported surfaces are:
 
-- `flakeModules.default` (alias `flakeModules.agentic`) — flake-parts
+- `flakeModules.workbench` (also `default` and legacy `agentic`) — flake-parts
   consumers.
-- `devenvModules.default` — the project shell bootstrap.
-- `homeModules.default` — user-tier (home-manager) delivery.
+- `devenvModules.workbench` (also `default` and legacy `agentic`) — the
+  project shell bootstrap.
+- `homeModules.workbench` (also `default` and legacy `agentic`) — user-tier
+  (home-manager) delivery.
 - `flake.modules.<class>.<name>` — dendritic consumers may merge the
   namespace directly; it carries the same modules as the aliases above.
+
+`workbench.*` is the public option namespace for new consumers. Existing
+`agentic.*` declarations remain valid and resolve to the same option graph;
+the implementation still uses the Agentic paths during this compatibility
+phase. Both names publish identical generated artifacts. Alias removal is a
+separate breaking change after known consumers migrate.
 
 Pi MCP delivery is available as `packages.<system>.pi-mcp-adapter`, a pinned
 local Pi package with its runtime dependencies. Opt into shared user MCP

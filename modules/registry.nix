@@ -5,13 +5,16 @@
 # imports the SAME files with lock-derived resolvers, so no capability
 # can drift between transports.
 {inputs, ...}: {
-  flake.modules.flake.agentic = {
+  flake.modules.flake.agentic = {lib, ...}: {
     _module.args.agenticInputs = {
       mcpServersSrc = "${inputs.mcp-servers-nix}";
       qmdBase = pkgs: inputs.qmd.packages.${pkgs.stdenv.hostPlatform.system}.qmd;
     };
 
     imports = [
+      # Both public names resolve to the existing registry option graph.
+      # Moving the implementation namespace is a later migration step.
+      (lib.mkAliasOptionModule ["workbench"] ["agentic"])
       ./registry/_secrets.nix
       ./registry/_mcp.nix
       ./registry/_forges.nix

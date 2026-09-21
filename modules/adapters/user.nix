@@ -52,7 +52,10 @@
           config.programs.mcp.servers;
         };
   in {
-    imports = [inputs.mcp-servers-nix.homeManagerModules.default];
+    imports = [
+      inputs.mcp-servers-nix.homeManagerModules.default
+      (lib.mkAliasOptionModule ["workbench"] ["agentic"])
+    ];
 
     options.agentic.mcp.sharedUserConfig.enable = lib.mkEnableOption "shared user MCP delivery to ~/.config/mcp/mcp.json (including Pi)";
 
