@@ -60,17 +60,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1784459989,
-        "narHash": "sha256-20D8icMnLMSozaAQ4tM+/yt836biaFltoehcrwBEX/Y=",
+        "lastModified": 1790233463,
+        "narHash": "sha256-Jy+PIVUrEreKDAe2U7kSCGiEFW9dVXTNTgVynaST36w=",
         "owner": "bryandph",
         "repo": "mcp-servers-nix",
-        "rev": "11c18bdce72a134168384a09b9df52268d3dcfd9",
+        "rev": "b72c30cf9e32f6f36440c8dc557f94757b916c25",
         "type": "github"
       },
       "original": {
         "owner": "bryandph",
         "repo": "mcp-servers-nix",
-        "rev": "11c18bdce72a134168384a09b9df52268d3dcfd9",
+        "rev": "b72c30cf9e32f6f36440c8dc557f94757b916c25",
         "type": "github"
       }
     },
