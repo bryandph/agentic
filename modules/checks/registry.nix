@@ -30,6 +30,10 @@
             };
           };
 
+          # Knowledge search is opt-in; declare a collection so the project
+          # tier still carries it.
+          agentic.knowledgeSearch.collections.fixture.path = ".serena/memories";
+
           agentic.mcp.servers = {
             forge = {
               tiers = ["user" "project"];
@@ -101,7 +105,8 @@
     # tiers so Codex receives it through the user delivery plane.
     checks.mcp-registry = assert p.userTier == ["forge" "plain" "serena"];
     # Serena and knowledge search arrive from core's own modules (tasks
-    # 2.5/2.5b); both are present in the project tier as well.
+    # 2.5/2.5b; knowledge only with declared collections); both are present
+    # in the project tier as well.
     assert p.projectTier == ["docs" "forge" "knowledge" "plain" "serena"];
     assert p.httpSecretVars == ["DOCS_API_KEY"];
     assert p.validOk == ["forge"];

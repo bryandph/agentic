@@ -22,8 +22,8 @@ Serena is the project's **memory holder** — plain markdown under
   writable namespaces are everything else. Cross-reference memories
   with `mem:`-prefixed links; `serena memories check` gates reference
   integrity in CI.
-- Retrieval: names/grep first; use the knowledge semantic-search tool
-  (`qmd`-based, MCP or CLI) for concept-level recall over the corpus.
+- Retrieval: names/grep first; use a knowledge-search tool, when the
+  environment provides one, for concept-level recall over the corpus.
 - Prefer symbolic tools (`get_symbols_overview`, `find_symbol`) over
   whole-file reads when serena runs with language servers.
 

@@ -94,8 +94,8 @@ in {
   config.agentic.devenvLib = {
     inherit bootstrapScript managedMcpConfig projectConfigFor;
     # Workflow CLIs the shell should carry: knowledge search (the CLI
-    # equivalent Pi relies on).
-    packages = pkgs: [(acfg.knowledgeSearch.lib.wrapper pkgs)];
+    # equivalent Pi relies on), when the consumer declares collections.
+    packages = pkgs: lib.optional (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.wrapper pkgs);
 
     # The devenv module body — identical under both transports.
     shellModule = {pkgs, ...}: {

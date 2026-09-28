@@ -36,10 +36,27 @@
     };
 
     p = fixture.agenticProbe;
+
+    # A consumer without collections opts out: no server, no CLI equivalent.
+    optOut = inputs.flake-parts.lib.mkFlake {inherit inputs;} {
+      systems = [system];
+      imports = [
+        config.flake.flakeModules.default
+        ({config, ...}: {
+          flake.agenticProbe = {
+            hasKnowledge = config.agentic.mcp.servers ? knowledge;
+            cliEquivalents = builtins.attrNames config.agentic.mcp.lib.cliEquivalents;
+          };
+        })
+      ];
+    };
+    q = optOut.agenticProbe;
   in {
     checks.knowledge-search = assert p.knowledgeTiers == ["project"];
     assert p.knowledgeArgs == ["mcp"];
     assert p.cliEquivalents == ["knowledge"];
+    assert !q.hasKnowledge;
+    assert !(builtins.elem "knowledge" q.cliEquivalents);
       pkgs.runCommand "agentic-knowledge-search" {
         nativeBuildInputs = [pkgs.gnugrep];
       } ''

@@ -17,6 +17,8 @@
     inherit (pkgs) lib;
 
     fixtureModule = {config, ...}: {
+      # Knowledge search is opt-in; the CLI-equivalents rendering needs it.
+      agentic.knowledgeSearch.collections.fixture.path = ".serena/memories";
       agentic.knowledge = {
         fixture-conventions.file = ./_fixtures/fixture-conventions.md;
         fixture-review = {

@@ -83,7 +83,9 @@ in {
       package = qmdPackage;
     };
 
-    agentic.mcp.servers.knowledge = {
+    # Opt-in: a consumer that declares no collections gets no knowledge
+    # server, no CLI, and never builds qmd.
+    agentic.mcp.servers.knowledge = lib.mkIf (cfg.collections != {}) {
       tiers = ["project"];
       command = pkgs: "${wrapper pkgs}/bin/qmd-knowledge";
       args = ["mcp"];
