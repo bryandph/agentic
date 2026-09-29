@@ -115,8 +115,18 @@ in {
     inherit memoriesDir projectYml placeScript;
     # `serena memories check` always exits 0 by design — CI must gate
     # on the report text instead. This script fails on any finding.
+    #
+    # The CLI resolves `.` only through the global project registry
+    # (serena_config.yml `projects:`), never by auto-registering an
+    # existing .serena/project.yml — so a fresh HOME (build sandbox,
+    # CI) reports "No Serena project found". Register the cwd in a
+    # throwaway SERENA_HOME so the operator's real registry is never
+    # touched when this runs outside a sandbox.
     checkScript = pkgs: ''
-      serena_report="$(${config.agentic.serena.lib.serenaPackage pkgs}/bin/serena memories check .)"
+      serena_home="$(mktemp -d)"
+      printf 'projects:\n- %s\n' "$PWD" >"$serena_home/serena_config.yml"
+      serena_report="$(SERENA_HOME="$serena_home" ${config.agentic.serena.lib.serenaPackage pkgs}/bin/serena memories check .)"
+      rm -rf "$serena_home"
       printf '%s\n' "$serena_report"
       printf '%s' "$serena_report" | grep -qF '✓ No referential integrity issues found.'
     '';
