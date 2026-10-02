@@ -78,7 +78,9 @@
             projectTier = builtins.attrNames (config.agentic.mcp.lib.serversForTier "project");
             httpSecretVars = builtins.attrNames config.agentic.mcp.lib.httpSecretRefs;
             oauthClaude = (config.agentic.mcp.lib.renderTier pkgs "project").plain.oauth;
-            oauthCodex = (config.agentic.mcp.lib.renderCodexTier pkgs "project").plain.oauth;
+            oauthCodex = let
+              server = (config.agentic.mcp.lib.renderCodexTier pkgs "project").plain;
+            in {inherit (server) oauth scopes;};
             oauthOpenCode = (config.agentic.mcp.lib.openCodeOAuth pkgs "project").plain.oauth;
             validOk = config.agentic.mcp.lib.validateAgentRefs "fixture-agent" ["forge"];
             externalOk = config.agentic.mcp.lib.validateAgentRefs "fixture-agent" ["adhoc"];
@@ -120,7 +122,7 @@
     };
     assert p.oauthCodex
     == {
-      client_id = "fixture-tools";
+      oauth.client_id = "fixture-tools";
       scopes = ["openid" "offline_access"];
     };
     assert p.oauthOpenCode

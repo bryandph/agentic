@@ -242,11 +242,13 @@
     // lib.optionalAttrs ((server.env or {}) != {}) {inherit (server) env;}
     // lib.optionalAttrs ((server.url or null) != null) {inherit (server) url;}
     // lib.optionalAttrs ((server.oauth or null) != null) {
-      oauth =
-        {client_id = server.oauth.clientId;}
-        // lib.optionalAttrs ((server.oauth.scopes or "") != "") {
-          scopes = lib.splitString " " server.oauth.scopes;
-        };
+      oauth = {client_id = server.oauth.clientId;};
+    }
+    # Codex reads OAuth scopes from the server table, not from [oauth], which
+    # accepts only client_id and the callback settings (codex-rs
+    # config/src/mcp_types.rs).
+    // lib.optionalAttrs ((server.oauth.scopes or "") != "") {
+      scopes = lib.splitString " " server.oauth.scopes;
     }
     // lib.optionalAttrs (staticHeaders != {}) {http_headers = staticHeaders;}
     // lib.optionalAttrs (envHeaders != {}) {
