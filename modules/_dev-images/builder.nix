@@ -240,6 +240,14 @@
     warmPaths ? [],
     # Extra hosts Nix may fetch flake inputs from (the private forge).
     nixFetchHosts ? [],
+    # A derivation whose contents are merged into the image root (for example
+    # a personal Home Manager generation under the home directory). Merged
+    # into the single root source so /sandbox keeps one ownership rule; its
+    # store references are registered with the rest of the closure.
+    extraRoot ? null,
+    # Directories placed in front of PATH (for example a profile whose
+    # wrappers shadow the image's unconfigured harnesses).
+    pathPrefix ? [],
   }: let
     caBundle =
       if extraCA == null
@@ -349,6 +357,9 @@
         EOF
         mkdir -p $out${home}/.config/direnv
         echo 'source ${tools}/share/nix-direnv/direnvrc' > $out${home}/.config/direnv/direnvrc
+      ''}${lib.optionalString (extraRoot != null) ''
+        cp -rP --no-preserve=mode ${extraRoot}/. $out/
+        chmod -R u+w $out
       ''}
     '';
     # GC roots for the warm paths. A separate source whose permissions match
@@ -419,7 +430,7 @@
           User = "${toString uid}:${toString uid}";
           WorkingDir = home;
           Env = [
-            "PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
+            "PATH=${lib.concatMapStrings (d: d + ":") pathPrefix}/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
             "HOME=${home}"
             "LANG=C.UTF-8"
             # uv uses the baked CPython rather than downloading or picking a
