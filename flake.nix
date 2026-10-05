@@ -40,6 +40,24 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Dev-environment images (modules/dev-images.nix): nix2container builds
+    # them on a non-Nix base with per-store-path layers; llm-agents supplies
+    # the unconfigured agent harnesses. Consumers follow both to their pins.
+    nix2container = {
+      url = "github:nlewo/nix2container";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    # Not following our stable nixpkgs: llm-agents tracks unstable and its
+    # package set does not evaluate against the stable base (same deviation
+    # as qmd). Consumers follow it to their own llm-agents pin.
+    llm-agents = {
+      url = "github:numtide/llm-agents.nix";
+      inputs = {
+        treefmt-nix.follows = "treefmt-nix";
+        flake-parts.follows = "flake-parts";
+      };
+    };
   };
 
   outputs = inputs @ {flake-parts, ...}:
