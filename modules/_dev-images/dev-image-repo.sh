@@ -65,12 +65,15 @@ accept-flake-config = true"
 # identity hashes the per-arch manifest digests, which the reproducible
 # images fix for a given environment.
 rev=$(git rev-parse --short=12 HEAD)
-# The id covers the environment and the image it is layered on (tools,
-# policy, base digest): either changing must publish a new image.
+# The id covers the environment, the image it is layered on (tools, policy,
+# base digest) and the builder recipe (warm-only logic such as the
+# environment-bound policy): any of them changing must publish a new image.
 envId() {
   { nix eval --impure --raw ".#devShells.$1.$shell.inputDerivation.drvPath"
     echo
     nix eval --impure --raw "$builder#legacyPackages.$1.devImages.base.drvPath"
+    echo
+    nix eval --impure --raw "$builder#legacyPackages.$1.devImages.recipe" 2>/dev/null || true
   } | sha256sum | cut -c1-16
 }
 echo "dev-image-repo: $repository (shell $shell, commit $rev)" >&2

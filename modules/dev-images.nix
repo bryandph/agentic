@@ -19,6 +19,8 @@
   ...
 }: {
   flake.lib.devImages = import ./_dev-images/builder.nix;
+  # Changes whenever the builder does; part of a warm image's identity.
+  flake.lib.devImagesRecipe = builtins.hashFile "sha256" ./_dev-images/builder.nix;
 
   perSystem = {
     pkgs,

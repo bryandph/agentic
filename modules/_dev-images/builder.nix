@@ -291,26 +291,44 @@
     # meta packages (pkgs.nix's bin/nix links into its CLI component) resolve
     # elsewhere. For every bound package, also bind the store roots its
     # bin/* executables resolve to. JSON is valid YAML.
-    policy =
-      pkgs.runCommand "${baseNameOf name}-policy.yaml" {
+    policy = pkgs.runCommand "${baseNameOf name}-policy.yaml" ({
         spec = builtins.toJSON policySpec;
         passAsFile = ["spec"];
         nativeBuildInputs = [pkgs.jq];
-      } ''
-        roots='{}'
-        for bound in $(jq -r '[.network_policies[].binaries[].path | rtrimstr("/**")] | unique[]' "$specPath"); do
-          [ -d "$bound/bin" ] || continue
-          for exe in "$bound"/bin/*; do
-            root=$(readlink -f "$exe" | cut -d/ -f1-4)
-            [ "$root" = "$bound" ] && continue
-            roots=$(jq -c --arg b "$bound" --arg r "$root" '.[$b] = ((.[$b] // []) + [$r] | unique)' <<< "$roots")
-          done
+      }
+      // lib.optionalAttrs (warmPaths != []) {
+        warmClosure = pkgs.closureInfo {rootPaths = warmPaths;};
+      }) ''
+      roots='{}'
+      for bound in $(jq -r '[.network_policies[].binaries[].path | rtrimstr("/**")] | unique[]' "$specPath"); do
+        [ -d "$bound/bin" ] || continue
+        for exe in "$bound"/bin/*; do
+          root=$(readlink -f "$exe" | cut -d/ -f1-4)
+          [ "$root" = "$bound" ] && continue
+          roots=$(jq -c --arg b "$bound" --arg r "$root" '.[$b] = ((.[$b] // []) + [$r] | unique)' <<< "$roots")
         done
-        jq --argjson roots "$roots" '
-          .network_policies |= map_values(.binaries |= (
-            . + [.[].path | rtrimstr("/**") | ($roots[.] // [])[] | {path: (. + "/**")}] | unique_by(.path)))
-        ' "$specPath" > $out
-      '';
+      done
+      jq --argjson roots "$roots" '
+        .network_policies |= map_values(.binaries |= (
+          . + [.[].path | rtrimstr("/**") | ($roots[.] // [])[] | {path: (. + "/**")}] | unique_by(.path)))
+      ' "$specPath" > $out${lib.optionalString (warmPaths != []) ''
+
+        # Warm images: a repository's devShell brings its own toolchain
+        # builds (its uv, nix, python, ...). Bind each rule to the
+        # same-named packages in the warm closure too, so the shell's own
+        # tools reach their registries while egress stays binary-bound.
+        nameOf='sub("^/nix/store/[a-z0-9]{32}-"; "") | sub("-[0-9][^-]*(-.*)?$"; "")'
+        matches='{}'
+        for n in $(jq -r "[.network_policies[].binaries[].path | rtrimstr(\"/**\") | select(startswith(\"/nix/store/\")) | $nameOf] | unique[]" $out); do
+          m=$(grep -E "^/nix/store/[a-z0-9]{32}-$n-[0-9]" $warmClosure/store-paths | jq -R . | jq -sc . || true)
+          matches=$(jq -c --arg n "$n" --argjson m "''${m:-[]}" '.[$n] = $m' <<< "$matches")
+        done
+        jq --argjson m "$matches" ".network_policies |= map_values(.binaries |= (
+          . + [.[].path | rtrimstr(\"/**\") | select(startswith(\"/nix/store/\")) | $nameOf | (\$m[.] // [])[] | {path: (. + \"/**\")}] | unique_by(.path)))
+        " $out > $TMPDIR/policy.json
+        cp $TMPDIR/policy.json $out
+      ''}
+    '';
 
     nixConf = pkgs.writeText "nix.conf" ''
       experimental-features = nix-command flakes
