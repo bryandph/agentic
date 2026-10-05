@@ -358,7 +358,7 @@
         mkdir -p $out${home}/.config/direnv
         echo 'source ${tools}/share/nix-direnv/direnvrc' > $out${home}/.config/direnv/direnvrc
       ''}${lib.optionalString (extraRoot != null) ''
-        cp -rP --no-preserve=mode ${extraRoot}/. $out/
+        cp -rP --no-preserve=mode --remove-destination ${extraRoot}/. $out/
         chmod -R u+w $out
       ''}
     '';
