@@ -57,7 +57,7 @@
       (lib.mkAliasOptionModule ["workbench"] ["agentic"])
     ];
 
-    options.agentic.mcp.sharedUserConfig.enable = lib.mkEnableOption "shared user MCP delivery to ~/.config/mcp/mcp.json (including Pi)";
+    options.agentic.mcp.sharedUserConfig.enable = lib.mkEnableOption "shared user MCP delivery to ~/.config/mcp/mcp.json for compatibility clients";
 
     options.agentic.mcp.userServers = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
@@ -78,8 +78,9 @@
           config.agentic.mcp.userServers);
       # Prefer HM's native writer. A consumer can still explicitly disable it.
       programs.mcp.enable = lib.mkIf config.agentic.mcp.sharedUserConfig.enable (lib.mkDefault true);
-      # Pi deliberately uses this literal path, not XDG_CONFIG_HOME. Add one
-      # fallback only when the upstream file does not already land here.
+      # Compatibility clients can require this literal path rather than the
+      # configured XDG location. Add one fallback only when the upstream file
+      # does not already land here. Native Pi uses ~/.pi/agent/mcp.json.
       home.file.".config/mcp/mcp.json" =
         lib.mkIf
         (config.agentic.mcp.sharedUserConfig.enable && !nativeDeliversShared) {

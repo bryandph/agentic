@@ -52,13 +52,14 @@ the implementation still uses the Agentic paths during this compatibility
 phase. Both names publish identical generated artifacts. Alias removal is a
 separate breaking change after known consumers migrate.
 
-Pi MCP delivery is available as `packages.<system>.pi-mcp-adapter`, a pinned
-local Pi package with its runtime dependencies. Opt into shared user MCP
-delivery with HM `agentic.mcp.sharedUserConfig.enable = true`; project delivery
-reuses `.mcp.json`. Consuming flakes also expose `pi-agent-roles`, a package of
-specialist prompt templates compiled from the agent registry. See
-[Pi delivery](docs/pi.md) for the trust boundary, mutable-file ownership,
-package contract, and targeted runtime check.
+Pi 1.1+ consumes the registry through its built-in MCP client: environments
+reconcile user servers into writable `~/.pi/agent/mcp.json`, while project
+bootstrap provides the trusted `.pi/mcp.json`. The legacy
+`packages.<system>.pi-mcp-adapter` remains only for consumers pinned before
+built-in MCP and must not be registered alongside it. Consuming flakes also
+expose `pi-agent-roles`, a package of specialist prompt templates compiled from
+the agent registry. See [Pi delivery](docs/pi.md) for ownership, native paths,
+compatibility, and targeted checks.
 
 ### Agent role projections
 

@@ -78,6 +78,11 @@
       (builtins.readFile ./_fixtures/pi-mcp-runtime-runner.py)
     );
   in {
+    checks.pi-native-project-config = assert lib.hasInfix ".pi/mcp.json" (builtins.readFile ../registry/_bootstrap.nix);
+      pkgs.runCommand "pi-native-project-config" {} ''
+        test -e ${project}
+        touch "$out"
+      '';
     checks.pi-mcp-hm = assert hm.valid;
       pkgs.runCommand "pi-mcp-hm-targets" {nativeBuildInputs = [pkgs.jq];} ''
         for files in ${lib.escapeShellArgs (map toString hm.homeFiles)}; do

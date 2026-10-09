@@ -5,7 +5,9 @@
 #
 # Devenv's managed-file lifecycle places `.mcp.json`,
 # `.codex/config.toml`, and the OpenCode config. On shell entry this
-# module idempotently places agent directories, the generated `.serena/project.yml` +
+# module also links Pi's native `.pi/mcp.json` to the same project-tier
+# MCP artifact because Pi does not read Claude's root-level filename,
+# then idempotently places agent directories, the generated `.serena/project.yml` +
 # read-only memory namespace, the generated `.workmux.yaml`, and the
 # http-secret exports. `AGENTS.md`/`CLAUDE.md` are committed artifacts,
 # never shell-entry placements.
@@ -70,6 +72,8 @@
   bootstrapScript = pkgs: ''
     # agentic bootstrap — idempotent; re-entry changes nothing when
     # inputs are unchanged.
+    mkdir -p .pi
+    ln -sfn ${projectConfigFor pkgs "claude-code"} .pi/mcp.json
     ${acfg.agentsLib.placeScript pkgs}
     # Knowledge memory plane: generated namespace + project.yml.
     ${acfg.memoryPlane.lib.placeScript pkgs}
