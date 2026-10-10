@@ -90,9 +90,18 @@
         # entry places managed files (.codex/config.toml, agent dirs,
         # git hooks); agent sandboxes forbid some of those writes (Codex
         # protects .codex/), but accept an already-correct placement.
-        if command -v direnv >/dev/null 2>&1; then
-          direnv exec . true >/dev/null 2>&1 \
-            || echo "agentic: dev shell warm-up failed; sandboxed agents may be unable to enter it" >&2
+        # Call the shell directly: `direnv exec` is a no-op under
+        # nix_direnv_manual_reload.
+        # devenv.nix marks the devenv-native transport (a flake may also
+        # exist without a devShell); otherwise the flake adapter.
+        warm_status=0
+        if [ -f devenv.nix ] && command -v devenv >/dev/null 2>&1; then
+          devenv shell -- true >/dev/null 2>&1 || warm_status=$?
+        elif [ -f flake.nix ]; then
+          nix develop --impure -c true >/dev/null 2>&1 || warm_status=$?
+        fi
+        if [ "$warm_status" != 0 ]; then
+          echo "agentic: dev shell warm-up failed; sandboxed agents may be unable to enter it" >&2
         fi
       '';
     };
