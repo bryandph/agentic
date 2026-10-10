@@ -4,10 +4,6 @@
 # Defaults are TRAIT-KEYED, not universal:
 #   * submodules -> the setup script re-inits them (worktrees don't
 #     carry submodule state).
-#   * NO stateful devenv services -> `.direnv`/`.devenv` are symlinked
-#     from the main worktree to reuse the devenv cache (avoids
-#     re-evaluating the flake per worktree). Repos WITH services keep
-#     per-worktree state (databases, process dirs) — never shared.
 #   * secret-bearing dotfiles (vault-resolved `.env` and friends) are
 #     COPIED per worktree, never symlink-shared.
 #
@@ -16,6 +12,15 @@
 # hook (wired via devenv's first-party `claude.code.hooks` in the
 # devenv adapter) invoke the SAME script, so the two paths cannot
 # drift.
+#
+# Per-worktree state, always: `.direnv`/`.devenv` are never shared.
+# `.devenv` holds a locked task database and runtime/state dirs, and
+# sandboxed agents (Codex) cannot write through links into the main
+# checkout. A fresh worktree shell costs seconds because outputs come
+# from the shared Nix store. Git hooks are per-worktree too: devenv
+# installs hooks with an absolute config path into the shared hooks
+# dir, so the last worktree to enter its shell would own every
+# worktree's hook, and removing it would break commits everywhere.
 #
 # Detect-and-degrade (4.3) lives HERE, outside the shell: the setup
 # script probes flake git-discovery BEFORE placing anything; on the
@@ -67,12 +72,14 @@
           fi
         done
 
-        ${lib.optionalString (!cfg.traits.statefulServices) ''
-          # Share the devenv/direnv cache with the main worktree —
-          # safe only because this repo declares no stateful services.
-          [ -e "$main_wt/.direnv" ] && ln -sfn "$main_wt/.direnv" .direnv
-          [ -e "$main_wt/.devenv" ] && ln -sfn "$main_wt/.devenv" .devenv
-        ''}
+        # Linked worktrees install git hooks into their own gitdir
+        # (`git rev-parse --git-path hooks` follows core.hooksPath).
+        git_dir="$(git rev-parse --absolute-git-dir)"
+        common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+        if [ "$git_dir" != "$common_dir" ]; then
+          git config extensions.worktreeConfig true
+          git config --worktree core.hooksPath "$git_dir/hooks"
+        fi
 
         command -v direnv >/dev/null 2>&1 && direnv allow || true
       '';
@@ -107,10 +114,9 @@
       # Submodule note: git worktrees don't carry submodule state — the
       # setup script re-initializes them (trait-keyed: only when the repo
       # declares submodules).
-      # Direnv note: `.direnv`/`.devenv` are symlinked from the main
-      # worktree to reuse the devenv cache ONLY when the repo declares no
-      # stateful devenv services; secret-bearing dotfiles are copied per
-      # worktree, never symlink-shared.
+      # Worktree state: `.direnv`, `.devenv`, and git hooks are
+      # per-worktree, never shared with the main checkout;
+      # secret-bearing dotfiles are copied per worktree.
       # pre_merge rationale: deliberately NOT `--all-systems` — that
       # evaluates every host on every arch from the merging workstation
       # (IFD-on-foreign-arch bugs, minutes-to-hours). Full-fleet coverage
@@ -132,11 +138,6 @@ in {
         type = lib.types.bool;
         default = false;
         description = "Repo has git submodules (setup script re-inits them per worktree).";
-      };
-      statefulServices = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = "Repo runs stateful devenv services (disables .direnv/.devenv sharing across worktrees).";
       };
       secretDotfiles = lib.mkOption {
         type = lib.types.listOf lib.types.str;

@@ -1,9 +1,9 @@
 # Fixture checks for workmux generation + the worktree setup script
-# (tasks 4.2/4.3): trait-keyed defaults — a submodule repo without
-# services gets the submodule init + cache symlinks; a services repo
-# with a secret .env (the finance shape) gets neither symlink and
-# copies .env per worktree; the degrade diagnostic lives in the setup
-# script BEFORE any artifact placement.
+# (tasks 4.2/4.3): a submodule repo gets the submodule init; a repo
+# with a secret .env (the finance shape) copies .env per worktree.
+# Neither shares devenv state, and both give linked worktrees their own
+# hooks dir. The degrade diagnostic lives in the setup script BEFORE
+# any artifact placement.
 {
   inputs,
   config,
@@ -37,10 +37,7 @@
     };
 
     financeShape = mkFixture {
-      agentic.workmux.traits = {
-        statefulServices = true;
-        secretDotfiles = [".env"];
-      };
+      agentic.workmux.traits.secretDotfiles = [".env"];
     };
 
     pkgOf = fixture: name: fixture.packages.${system}.${name};
@@ -66,19 +63,22 @@
         # post_create invokes the single setup script.
         grep -qF "$setup" "$cfg"
 
-        # Submodule repo, no services: init + cache sharing.
+        # Submodule repo: init; per-worktree devenv state and hooks.
         grep -qF 'git submodule update --init' "$setup"
-        grep -qF 'ln -sfn "$main_wt/.direnv" .direnv' "$setup"
+        ! grep -qF '.direnv" .direnv' "$setup"
+        ! grep -qF '.devenv" .devenv' "$setup"
+        grep -qF 'git config --worktree core.hooksPath "$git_dir/hooks"' "$setup"
         # Degrade probe precedes artifact placement and names the
         # constraint + workaround.
         grep -qF 'nix flake metadata --json' "$setup"
         grep -qF 'worktree of a SUBMODULE' "$setup"
         grep -qF 'nix shell nixpkgs#<tool>' "$setup"
 
-        # Finance shape: services + secret .env — no cache symlinks,
-        # .env copied per worktree, no submodule init.
+        # Finance shape: secret .env copied per worktree, no submodule
+        # init, no shared devenv state, per-worktree hooks.
         fsetup=${pkgOf financeShape "workmux-setup"}/bin/agentic-worktree-setup
-        ! grep -qF 'ln -sfn "$main_wt/.direnv"' "$fsetup"
+        ! grep -qF '.direnv" .direnv' "$fsetup"
+        grep -qF 'core.hooksPath' "$fsetup"
         ! grep -qF 'git submodule update --init' "$fsetup"
         grep -qF ".env" "$fsetup"
 
