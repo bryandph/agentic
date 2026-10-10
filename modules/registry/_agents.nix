@@ -315,9 +315,12 @@
         rmdir "$agentic_dir"
       fi
     done
-    ln -sfn ${agentsDir renderClaude "md" "claude-agents" pkgs} .claude/agents
-    ln -sfn ${codexAgentsDir pkgs} .codex/agents
-    ln -sfn ${agentsDir renderOpencode "md" "opencode-agents" pkgs} .opencode/agents
+    # Relink only on change: agent sandboxes (Codex) may forbid writes
+    # under .codex/ even when the link is already current.
+    agentic_link() { [ "$(readlink "$2" 2>/dev/null)" = "$1" ] || ln -sfn "$1" "$2"; }
+    agentic_link ${agentsDir renderClaude "md" "claude-agents" pkgs} .claude/agents
+    agentic_link ${codexAgentsDir pkgs} .codex/agents
+    agentic_link ${agentsDir renderOpencode "md" "opencode-agents" pkgs} .opencode/agents
   '';
 in {
   options.agentic = {

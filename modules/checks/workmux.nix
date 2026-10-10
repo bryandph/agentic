@@ -68,6 +68,8 @@
         ! grep -qF '.direnv" .direnv' "$setup"
         ! grep -qF '.devenv" .devenv' "$setup"
         grep -qF 'git config --worktree core.hooksPath "$git_dir/hooks"' "$setup"
+        # Dev shell warmed once, outside any agent sandbox.
+        grep -qF 'direnv exec . true' "$setup"
         # Degrade probe precedes artifact placement and names the
         # constraint + workaround.
         grep -qF 'nix flake metadata --json' "$setup"

@@ -73,7 +73,8 @@
     # agentic bootstrap — idempotent; re-entry changes nothing when
     # inputs are unchanged.
     mkdir -p .pi
-    ln -sfn ${projectConfigFor pkgs "claude-code"} .pi/mcp.json
+    [ "$(readlink .pi/mcp.json 2>/dev/null)" = ${projectConfigFor pkgs "claude-code"} ] \
+      || ln -sfn ${projectConfigFor pkgs "claude-code"} .pi/mcp.json
     ${acfg.agentsLib.placeScript pkgs}
     # Knowledge memory plane: generated namespace + project.yml.
     ${acfg.memoryPlane.lib.placeScript pkgs}

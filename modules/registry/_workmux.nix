@@ -20,7 +20,10 @@
 # from the shared Nix store. Git hooks are per-worktree too: devenv
 # installs hooks with an absolute config path into the shared hooks
 # dir, so the last worktree to enter its shell would own every
-# worktree's hook, and removing it would break commits everywhere.
+# worktree's hook, and removing it would break commits everywhere. The
+# script enters the dev shell once, outside any agent sandbox, so
+# managed files exist before a sandboxed agent (which may not write
+# .codex/) starts.
 #
 # Detect-and-degrade (4.3) lives HERE, outside the shell: the setup
 # script probes flake git-discovery BEFORE placing anything; on the
@@ -82,6 +85,15 @@
         fi
 
         command -v direnv >/dev/null 2>&1 && direnv allow || true
+
+        # Enter the dev shell once, here, before any agent runs. Shell
+        # entry places managed files (.codex/config.toml, agent dirs,
+        # git hooks); agent sandboxes forbid some of those writes (Codex
+        # protects .codex/), but accept an already-correct placement.
+        if command -v direnv >/dev/null 2>&1; then
+          direnv exec . true >/dev/null 2>&1 \
+            || echo "agentic: dev shell warm-up failed; sandboxed agents may be unable to enter it" >&2
+        fi
       '';
     };
 
