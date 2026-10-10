@@ -39,6 +39,36 @@
 }: let
   cfg = config.agentic.workmux;
 
+  # Per-worktree git hooks dir for a linked worktree (shared by the
+  # setup script and the devenv task that runs before hook install).
+  # Enabling extensions.worktreeConfig makes git read core.worktree and
+  # core.bare from per-worktree config, so first move them out of the
+  # shared config into the main worktree's config.worktree (git-worktree
+  # CONFIGURATION FILE); submodule gitdirs always set core.worktree.
+  worktreeHooksScript = pkgs:
+    pkgs.writeShellApplication {
+      name = "agentic-worktree-hooks";
+      runtimeInputs = [pkgs.git];
+      text = ''
+        git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
+        common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+        [ "$git_dir" != "$common_dir" ] || exit 0
+        if [ "$(git config --file "$common_dir/config" --get extensions.worktreeConfig || true)" != true ]; then
+          for key in core.worktree core.bare; do
+            value="$(git config --file "$common_dir/config" --get "$key" || true)"
+            if [ -n "$value" ] && { [ "$key" = core.worktree ] || [ "$value" = true ]; }; then
+              git config --file "$common_dir/config.worktree" "$key" "$value"
+              git config --file "$common_dir/config" --unset "$key"
+            fi
+          done
+          git config --file "$common_dir/config" extensions.worktreeConfig true
+        fi
+        if [ "$(git config --worktree --get core.hooksPath || true)" != "$git_dir/hooks" ]; then
+          git config --worktree core.hooksPath "$git_dir/hooks"
+        fi
+      '';
+    };
+
   setupScript = pkgs:
     pkgs.writeShellApplication {
       name = "agentic-worktree-setup";
@@ -75,14 +105,16 @@
           fi
         done
 
-        # Linked worktrees install git hooks into their own gitdir
-        # (`git rev-parse --git-path hooks` follows core.hooksPath).
-        git_dir="$(git rev-parse --absolute-git-dir)"
-        common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
-        if [ "$git_dir" != "$common_dir" ]; then
-          git config extensions.worktreeConfig true
-          git config --worktree core.hooksPath "$git_dir/hooks"
-        fi
+        # Worktrees created before devenv state stopped being shared
+        # still link into the main checkout; replace those links.
+        for d in .direnv .devenv; do
+          if [ -L "$d" ] && [ "$(readlink "$d")" = "$main_wt/$d" ]; then
+            rm "$d"
+          fi
+        done
+
+        # Linked worktrees install git hooks into their own gitdir.
+        ${worktreeHooksScript pkgs}/bin/agentic-worktree-hooks
 
         command -v direnv >/dev/null 2>&1 && direnv allow || true
 
@@ -237,8 +269,8 @@ in {
   options.agentic.workmuxLib = lib.mkOption {
     type = lib.types.raw;
     readOnly = true;
-    description = "`configFile pkgs` (the generated .workmux.yaml) and `setupScript pkgs` (the single worktree-setup entrypoint).";
+    description = "`configFile pkgs` (the generated .workmux.yaml), `setupScript pkgs` (the single worktree-setup entrypoint), and `worktreeHooksScript pkgs` (per-worktree git hooks dir, also run by the devenv shell).";
   };
 
-  config.agentic.workmuxLib = {inherit configFile setupScript;};
+  config.agentic.workmuxLib = {inherit configFile setupScript worktreeHooksScript;};
 }

@@ -117,15 +117,7 @@ in {
       # dir first, whoever created it, so one worktree's install never
       # replaces (or, once removed, breaks) another checkout's hook.
       tasks."agentic:worktree-hooks" = lib.mkIf (config.git-hooks.enable or false) {
-        exec = ''
-          git_dir="$(${pkgs.git}/bin/git rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
-          common_dir="$(${pkgs.git}/bin/git rev-parse --path-format=absolute --git-common-dir)"
-          if [ "$git_dir" != "$common_dir" ] \
-            && [ "$(${pkgs.git}/bin/git config --worktree --get core.hooksPath 2>/dev/null)" != "$git_dir/hooks" ]; then
-            ${pkgs.git}/bin/git config extensions.worktreeConfig true
-            ${pkgs.git}/bin/git config --worktree core.hooksPath "$git_dir/hooks"
-          fi
-        '';
+        exec = "${acfg.workmuxLib.worktreeHooksScript pkgs}/bin/agentic-worktree-hooks";
         before = ["devenv:git-hooks:install"];
       };
       # One worktree setup path for ALL creators (agentic-devenv spec):

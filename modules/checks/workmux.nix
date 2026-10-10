@@ -25,6 +25,7 @@
               packages = {
                 workmux-config = config.agentic.workmuxLib.configFile pkgs;
                 workmux-setup = config.agentic.workmuxLib.setupScript pkgs;
+                worktree-hooks = config.agentic.workmuxLib.worktreeHooksScript pkgs;
               };
             };
           })
@@ -41,7 +42,54 @@
     };
 
     pkgOf = fixture: name: fixture.packages.${system}.${name};
+    hooksHelper = pkgOf submoduleRepo "worktree-hooks";
   in {
+    # A linked worktree of a SUBMODULE: the helper must move the shared
+    # core.worktree into the main worktree's config.worktree before
+    # enabling extensions.worktreeConfig, so both checkouts still resolve.
+    checks.workmux-worktree-hooks =
+      pkgs.runCommand "agentic-workmux-worktree-hooks" {
+        nativeBuildInputs = [pkgs.git];
+      } ''
+        set -euo pipefail
+        export HOME=$TMPDIR
+        git config --global user.email t@example.invalid
+        git config --global user.name t
+        git config --global init.defaultBranch main
+        git config --global protocol.file.allow always
+        cd $TMPDIR
+        git init -q sub && git -C sub commit -q --allow-empty -m init
+        git init -q super && git -C super commit -q --allow-empty -m init
+        git -C super submodule add -q "$TMPDIR/sub" sub
+        git -C super commit -q -m add
+        common="$(git -C super/sub rev-parse --path-format=absolute --git-common-dir)"
+        git config --file "$common/config" --get core.worktree >/dev/null
+        git -C super/sub worktree add -q --detach "$TMPDIR/sub-wt"
+
+        # Main worktree: no-op.
+        (cd super/sub && ${hooksHelper}/bin/agentic-worktree-hooks)
+        ! git config --file "$common/config" --get extensions.worktreeConfig
+
+        (cd sub-wt && ${hooksHelper}/bin/agentic-worktree-hooks)
+        ! git config --file "$common/config" --get core.worktree
+        git config --file "$common/config.worktree" --get core.worktree >/dev/null
+        test "$(git config --file "$common/config" --get extensions.worktreeConfig)" = true
+        wt_git="$(git -C sub-wt rev-parse --absolute-git-dir)"
+        test "$(git -C sub-wt config --worktree --get core.hooksPath)" = "$wt_git/hooks"
+        test "$(git -C sub-wt rev-parse --path-format=absolute --git-path hooks)" = "$wt_git/hooks"
+        test "$(git -C super/sub rev-parse --show-toplevel)" = "$(cd super/sub && pwd -P)"
+        test "$(git -C sub-wt rev-parse --show-toplevel)" = "$(cd sub-wt && pwd -P)"
+        git -C super/sub status --short >/dev/null
+        git -C super status --short >/dev/null
+        test "$(git -C super/sub rev-parse --path-format=absolute --git-path hooks)" = "$common/hooks"
+
+        # Idempotent.
+        before="$(cat "$common/config" "$common/config.worktree")"
+        (cd sub-wt && ${hooksHelper}/bin/agentic-worktree-hooks)
+        test "$before" = "$(cat "$common/config" "$common/config.worktree")"
+        touch $out
+      '';
+
     checks.workmux =
       pkgs.runCommand "agentic-workmux" {
         nativeBuildInputs = [pkgs.gnugrep];
@@ -67,7 +115,9 @@
         grep -qF 'git submodule update --init' "$setup"
         ! grep -qF '.direnv" .direnv' "$setup"
         ! grep -qF '.devenv" .devenv' "$setup"
-        grep -qF 'git config --worktree core.hooksPath "$git_dir/hooks"' "$setup"
+        grep -qF 'agentic-worktree-hooks' "$setup"
+        # Legacy shared-state links are replaced on re-run.
+        grep -qF '"$(readlink "$d")" = "$main_wt/$d"' "$setup"
         # Dev shell warmed once, outside any agent sandbox.
         grep -qF 'nix develop --impure -c true' "$setup"
         grep -qF 'devenv shell -- true' "$setup"
@@ -81,7 +131,7 @@
         # init, no shared devenv state, per-worktree hooks.
         fsetup=${pkgOf financeShape "workmux-setup"}/bin/agentic-worktree-setup
         ! grep -qF '.direnv" .direnv' "$fsetup"
-        grep -qF 'core.hooksPath' "$fsetup"
+        grep -qF 'agentic-worktree-hooks' "$fsetup"
         ! grep -qF 'git submodule update --init' "$fsetup"
         grep -qF ".env" "$fsetup"
 
