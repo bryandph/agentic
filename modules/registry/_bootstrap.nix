@@ -103,11 +103,31 @@ in {
     packages = pkgs: lib.optional (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.wrapper pkgs);
 
     # The devenv module body — identical under both transports.
-    shellModule = {pkgs, ...}: {
+    shellModule = {
+      pkgs,
+      config,
+      ...
+    }: {
       imports = [(builtins.toPath "${agenticInputs.mcpServersSrc}/modules/devenv.nix")];
       mcp-servers = managedMcpConfig pkgs;
       packages = acfg.devenvLib.packages pkgs;
       enterShell = bootstrapScript pkgs;
+      # devenv installs hooks into `git rev-parse --git-path hooks` with an
+      # absolute config path. Point each linked worktree at its own hooks
+      # dir first, whoever created it, so one worktree's install never
+      # replaces (or, once removed, breaks) another checkout's hook.
+      tasks."agentic:worktree-hooks" = lib.mkIf (config.git-hooks.enable or false) {
+        exec = ''
+          git_dir="$(${pkgs.git}/bin/git rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
+          common_dir="$(${pkgs.git}/bin/git rev-parse --path-format=absolute --git-common-dir)"
+          if [ "$git_dir" != "$common_dir" ] \
+            && [ "$(${pkgs.git}/bin/git config --worktree --get core.hooksPath 2>/dev/null)" != "$git_dir/hooks" ]; then
+            ${pkgs.git}/bin/git config extensions.worktreeConfig true
+            ${pkgs.git}/bin/git config --worktree core.hooksPath "$git_dir/hooks"
+          fi
+        '';
+        before = ["devenv:git-hooks:install"];
+      };
       # One worktree setup path for ALL creators (agentic-devenv spec):
       # Claude Code's native worktrees run the SAME script the generated
       # .workmux.yaml post_create runs. Wired through devenv's
