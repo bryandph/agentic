@@ -98,6 +98,27 @@ write the authoritative cache, while pull requests may write only their
 quarantine endpoint. The contract explicitly forbids protected substitution
 from pull-request entries and direct promotion between the two tiers.
 
+Every Nix write also requires `profiles.nix.publicationPolicy`, independent of
+trust tier. Its version-1 shape is `{ version = 1; executable = lib.getExe
+policyPackage; argv = []; identity = "consumer-policy"; revision = "<pinned-rev>";
+}`. Choose a store-pinned executable matching the writer architecture and retain
+its Nix string context; the generic layer does not supply a content policy.
+The client invokes the executable with literal `argv`, then `--closure-file
+<file>` containing the canonical, registered, complete closure snapshot. Policy
+exit 0 allows that snapshot, exit 1 denies it, and every other status is an error.
+Missing/malformed/unexecutable policies, failed/partial/empty closure queries,
+missing roots and snapshot drift cause **zero copies**, with an exit-0 refusal
+or failure report. Direct empty input fails; producers must explicitly skip
+legitimate no-work queues rather than call the writer without roots.
+
+Policy metadata is provided via `AGENTIC_CI_CACHE_POLICY_TRUST_TIER` and
+`AGENTIC_CI_CACHE_POLICY_REPOSITORY`. Policy processes receive a minimal
+credential-free environment (`PATH` and, when set, `NIX_REMOTE`); package the
+policy's dependencies in its own closure. Raw policy/query/copy output is
+suppressed to keep reports bounded and credential-free. Reports include policy
+identity, revision, outcome and exit status plus closure count. All snapshot
+paths, not a newly resolved roots list, are passed to copy after revalidation.
+
 #### The cache client: `agentic-ci-cache`
 
 Core also ships the consumer-side implementation of that contract. It is
@@ -111,7 +132,10 @@ one CLI, delivered two ways:
 - **Pre-wired** — `config.agentic.ciCache.lib.tools pkgs` returns the same
   binary with the resolved contract baked in (`lib.contractFile pkgs` is
   the JSON itself). Endpoints and variable *names* are public metadata; no
-  secret value can enter the contract or the store.
+  secret value can enter the contract or the store. This baked contract is
+  authoritative: runtime `AGENTIC_CI_CACHE_CONTRACT` overrides are ignored,
+  preventing replacement/removal of its required publication policy. The
+  standalone tool remains available for explicitly supplied runtime contracts.
 
 Subcommands: `identity`; `nix config` (substituter lines for `NIX_CONFIG`,
 never the quarantine); `nix publish <path>…` (bounded completed-closure

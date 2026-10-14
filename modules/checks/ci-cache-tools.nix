@@ -15,6 +15,11 @@
     self',
     ...
   }: let
+    # Synthetic content policy, never used by a consumer or remote endpoint.
+    policy = pkgs.writeShellScript "fixture-ci-cache-policy" ''
+      test "$1" = --closure-file && test -s "$2"
+    '';
+    environmentProfiles = import ./_fixtures/ci-cache-environment.nix;
     fixture = inputs.flake-parts.lib.mkFlake {inherit inputs;} {
       systems = [system];
       imports = [
@@ -24,7 +29,19 @@
             secrets.backend = "env";
             ciCache = {
               requestedProfiles = ["nix" "rust" "python"];
-              profiles = import ./_fixtures/ci-cache-environment.nix;
+              profiles =
+                environmentProfiles
+                // {
+                  nix =
+                    environmentProfiles.nix
+                    // {
+                      publicationPolicy = {
+                        executable = "${policy}";
+                        identity = "fixture-policy";
+                        revision = "fixture-revision";
+                      };
+                    };
+                };
             };
           };
           perSystem = {pkgs, ...}: {
@@ -55,6 +72,9 @@
         tool = self'.packages.ci-cache;
         wrapped = fixture.packages.${system}.ci-cache-wrapped;
         contract = fixture.packages.${system}.ci-cache-contract;
+        inherit policy;
+        denyPolicy = pkgs.writeShellScript "fixture-ci-cache-deny" "exit 1";
+        errorPolicy = pkgs.writeShellScript "fixture-ci-cache-error" "exit 2";
         # Off PATH on purpose: the suite proves the config-file wrapper is
         # in force and that the fallback disables it.
         sccacheBin = "${pkgs.sccache}/bin";

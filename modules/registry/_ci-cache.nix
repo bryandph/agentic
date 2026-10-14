@@ -83,6 +83,46 @@
           description = "Inputs that select the Nix publication namespace; store paths retain their native content identity.";
         };
 
+        publicationPolicy = mkOption {
+          type = types.nullOr (types.submodule {
+            options = {
+              version = mkOption {
+                type = types.enum [1];
+                default = 1;
+                description = "Policy protocol version: literal argv followed by --closure-file and the validated complete snapshot.";
+              };
+              executable = mkOption {
+                type = types.str;
+                description = "Store-pinned consumer policy executable for the writer's runtime architecture. Preserve its Nix string context (for example lib.getExe on a package); never a shell command.";
+              };
+              argv = mkOption {
+                type = types.listOf types.str;
+                default = [];
+                description = "Literal arguments before --closure-file. No shell evaluation or word splitting.";
+              };
+              identity = mkOption {
+                type = types.str;
+                description = "Bounded public policy identifier (1–128 characters: letters, digits, dot, underscore, colon, plus, slash or dash).";
+              };
+              revision = mkOption {
+                type = types.str;
+                description = "Bounded immutable policy revision, using the same character set as identity.";
+              };
+            };
+          });
+          default = null;
+          description = ''
+            Required consumer content-permission gate for BOTH protected and
+            pull-request publication. Missing policy, denial (exit 1), validation
+            error (exit 2), or any other nonzero status prevents every copy while
+            retaining report-and-continue. Exit 0 approves only this snapshot.
+            Policy output is suppressed; identity/revision/status are reported.
+            Metadata is supplied through AGENTIC_CI_CACHE_POLICY_TRUST_TIER and
+            AGENTIC_CI_CACHE_POLICY_REPOSITORY, not scanner-specific arguments.
+            No board-specific policy or dependency is supplied by Agentic.
+          '';
+        };
+
         publicationMode = mkOption {
           type = types.enum ["completed-closures"];
           default = "completed-closures";
