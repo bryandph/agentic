@@ -84,9 +84,11 @@ rejects individual role symlinks, so its directory contains regular TOML files.
 Environment layers may define `agentic.ciCache.profiles.{nix,rust,python}`.
 Repositories request the ecosystems they use through
 `agentic.ciCache.requestedProfiles`; the resolved, JSON-serializable contract
-is available as `flake.agenticCiCacheContract` and
+metadata is available as `flake.agenticCiCacheContract` and
 `config.agentic.ciCache.lib.contract` for the repository's own workflow
-renderer. Core never creates a workflow or supplies endpoints and credentials.
+renderer. `config.agentic.ciCache.lib.contractFor pkgs` resolves policy
+executables for the writer's runtime architecture; `contractFile pkgs` and
+`tools pkgs` use that resolved contract automatically. Core never creates a workflow or supplies endpoints and credentials.
 
 The language templates request matching profiles, but those requests are
 inert unless an environment layer defines them. This keeps the same templates
@@ -101,11 +103,21 @@ from pull-request entries and direct promotion between the two tiers.
 Every Nix write also requires `profiles.nix.publicationPolicy`, independent of
 trust tier. Its version-1 shape is `{ version = 1; executable = lib.getExe
 policyPackage; argv = []; identity = "consumer-policy"; revision = "<pinned-rev>";
-}`. Choose a store-pinned executable matching the writer architecture and retain
-its Nix string context; the generic layer does not supply a content policy.
+}` for an explicitly single-runtime contract. For flake-global configuration,
+use `executableBySystem = { x86_64-linux = lib.getExe linuxPolicy; aarch64-darwin =
+lib.getExe darwinPolicy; };` instead of `executable`. A nonempty map takes
+precedence, selecting exactly `pkgs.stdenv.hostPlatform.system`. Missing system
+entries resolve null and refuse writes, never borrow another architecture's
+policy. The map remains JSON-serializable in global metadata, but is removed
+from `contractFor pkgs` / runtime JSON. Preserve executable Nix string context;
+the generic layer does not supply a content policy.
 The client invokes the executable with literal `argv`, then `--closure-file
 <file>` containing the canonical, registered, complete closure snapshot. Policy
 exit 0 allows that snapshot, exit 1 denies it, and every other status is an error.
+Pinned `argv` may configure the trusted adapter, but cannot contain reserved
+`--closure-file` arguments, `--`, or direct `/nix/store/` inputs. Adapter-specific
+arguments must not select another source or bypass snapshot validation; the
+adapter is trusted policy code, not an arbitrary scanner command.
 Missing/malformed/unexecutable policies, failed/partial/empty closure queries,
 missing roots and snapshot drift cause **zero copies**, with an exit-0 refusal
 or failure report. Direct empty input fails; producers must explicitly skip

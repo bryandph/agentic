@@ -141,6 +141,11 @@ echo SECRET >&2
         run(tier, changes=lambda c: c["profiles"]["nix"].pop("publicationPolicy"))
         for bad in (None, {}, "shell command", {**policy, "version": 2},
                     {**policy, "argv": "eval me"}, {**policy, "argv": [1]},
+                    {**policy, "argv": ["--closure-file", "/tmp/alternate"]},
+                    {**policy, "argv": ["--closure-file=/tmp/alternate"]},
+                    {**policy, "argv": ["--", root]},
+                    {**policy, "argv": [root]},
+                    {**policy, "argv": ["bad\u0000argument"]},
                     {**policy, "executable": "/tmp/policy"},
                     {**policy, "executable": root + "/missing"},
                     {**policy, "identity": "bad\nidentity"}):

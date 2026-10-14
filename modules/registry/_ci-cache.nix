@@ -92,13 +92,19 @@
                 description = "Policy protocol version: literal argv followed by --closure-file and the validated complete snapshot.";
               };
               executable = mkOption {
-                type = types.str;
-                description = "Store-pinned consumer policy executable for the writer's runtime architecture. Preserve its Nix string context (for example lib.getExe on a package); never a shell command.";
+                type = types.nullOr types.str;
+                default = null;
+                description = "Explicit single-runtime store-pinned policy executable. For flake-global multi-architecture configuration use executableBySystem instead. Preserve its Nix string context (for example lib.getExe on a package); never a shell command.";
+              };
+              executableBySystem = mkOption {
+                type = types.attrsOf types.str;
+                default = {};
+                description = "Store-pinned policy executables indexed by Nix runtime system. A nonempty map takes precedence over executable; contractFor/tools/contractFile pkgs select exactly pkgs.stdenv.hostPlatform.system. A missing system resolves null (write refusal), never another architecture's executable.";
               };
               argv = mkOption {
                 type = types.listOf types.str;
                 default = [];
-                description = "Literal arguments before --closure-file. No shell evaluation or word splitting.";
+                description = "Literal pinned configuration arguments before --closure-file. No shell evaluation or word splitting; reserved closure-file arguments, -- and direct store-root inputs are rejected. The trusted adapter must always validate the supplied snapshot.";
               };
               identity = mkOption {
                 type = types.str;
@@ -308,6 +314,36 @@
     };
     profiles = selectedProfiles;
   };
+
+  # Keep the global projection JSON-serializable (including the architecture
+  # map). Resolve only when a consumer supplies the runtime package set; do not
+  # serialize functions or roundtrip context-bearing executable strings.
+  contractFor = pkgs: let
+    profile = selectedProfiles.nix or null;
+    policy =
+      if profile == null
+      then null
+      else profile.publicationPolicy;
+    resolvedPolicy =
+      if policy == null
+      then null
+      else
+        (builtins.removeAttrs policy ["executableBySystem"])
+        // {
+          executable =
+            if policy.executableBySystem != {}
+            then policy.executableBySystem.${pkgs.stdenv.hostPlatform.system} or null
+            else policy.executable;
+        };
+  in
+    contract
+    // {
+      profiles =
+        selectedProfiles
+        // lib.optionalAttrs (profile != null) {
+          nix = profile // {publicationPolicy = resolvedPolicy;};
+        };
+    };
 in {
   options.agentic.ciCache = {
     requestedProfiles = mkOption {
@@ -344,19 +380,19 @@ in {
     lib = mkOption {
       type = types.raw;
       readOnly = true;
-      description = "Resolved contract (`contract`, JSON-serializable), its store file (`contractFile pkgs`), and the pre-wired client (`tools pkgs`).";
+      description = "Global JSON-serializable contract metadata (`contract`), runtime-architecture resolved contract (`contractFor pkgs`), its store file (`contractFile pkgs`), and the pre-wired client (`tools pkgs`).";
     };
   };
 
   config = {
     agentic.ciCache.lib = {
-      inherit contract;
-      # Store path of the contract JSON (public metadata only).
-      contractFile = pkgs: tool.contractFile pkgs contract;
+      inherit contract contractFor;
+      # Store path of the architecture-resolved contract (public metadata only).
+      contractFile = pkgs: tool.contractFile pkgs (contractFor pkgs);
       # `agentic-ci-cache` with this contract pre-wired; the same binary is
       # published standalone as packages.<system>.ci-cache for consumers that
       # do not import the flake module.
-      tools = pkgs: tool.mkWrappedTool pkgs (tool.mkTool pkgs) (tool.contractFile pkgs contract);
+      tools = pkgs: tool.mkWrappedTool pkgs (tool.mkTool pkgs) (tool.contractFile pkgs (contractFor pkgs));
     };
     flake.agenticCiCacheContract = contract;
   };

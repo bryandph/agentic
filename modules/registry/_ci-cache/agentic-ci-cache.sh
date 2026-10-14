@@ -408,7 +408,9 @@ nix_publish() (
     type == "object" and .version == 1
     and (.executable | type == "string" and test("^/nix/store/[0123456789abcdfghijklmnpqrsvwxyz]{32}-[A-Za-z0-9+._?=-]+(/[A-Za-z0-9+_./=-]+)?$")
       and (split("/") | all(. != ".." and . != ".")))
-    and (.argv | type == "array" and length <= 64 and all(.[]; type == "string" and length <= 4096 and (contains("\u0000") | not)))
+    and (.argv | type == "array" and length <= 64 and all(.[]; type == "string" and length <= 4096 and (contains("\u0000") | not)
+      and . != "--" and (startswith("--closure-file") | not)
+      and (startswith("/nix/store/") | not)))
     and (.identity | type == "string" and test("^[A-Za-z0-9._:+/-]{1,128}$"))
     and (.revision | type == "string" and test("^[A-Za-z0-9._:+/-]{1,128}$"))
   ' <<<"$policy" >/dev/null 2>&1; then

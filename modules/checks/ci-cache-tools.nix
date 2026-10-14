@@ -36,7 +36,7 @@
                     environmentProfiles.nix
                     // {
                       publicationPolicy = {
-                        executable = "${policy}";
+                        executableBySystem.${system} = "${policy}";
                         identity = "fixture-policy";
                         revision = "fixture-revision";
                       };
