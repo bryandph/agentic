@@ -7,6 +7,14 @@ set -euo pipefail
 export HOME="$TMPDIR/home"
 mkdir -p "$HOME"
 export NIX_CONFIG="experimental-features = nix-command"
+# Never query or mutate the builder's database. Linux sandboxes have no host
+# registry, so bootstrap a private DB from Nix's declared-reference export.
+# Actual store paths remain the immutable derivation inputs under /nix/store;
+# the later payload store is independently rooted under TMPDIR.
+export NIX_STORE_DIR=/nix/store
+export NIX_STATE_DIR="$TMPDIR/runner-state" NIX_LOG_DIR="$TMPDIR/runner-log"
+mkdir -p "$NIX_STATE_DIR" "$NIX_LOG_DIR"
+NIX_REMOTE=local nix-store --load-db <"$runnerClosure/registration"
 export CI_REPO="fixture/consumer"
 export UV_PYTHON_DOWNLOADS=never UV_NO_CONFIG=1
 export CARGO_HOME="$TMPDIR/cargo-home" CARGO_INCREMENTAL=0

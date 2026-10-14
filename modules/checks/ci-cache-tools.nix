@@ -19,6 +19,8 @@
     policy = pkgs.writeShellScript "fixture-ci-cache-policy" ''
       test "$1" = --closure-file && test -s "$2"
     '';
+    denyPolicy = pkgs.writeShellScript "fixture-ci-cache-deny" "exit 1";
+    errorPolicy = pkgs.writeShellScript "fixture-ci-cache-error" "exit 2";
     environmentProfiles = import ./_fixtures/ci-cache-environment.nix;
     fixture = inputs.flake-parts.lib.mkFlake {inherit inputs;} {
       systems = [system];
@@ -72,9 +74,20 @@
         tool = self'.packages.ci-cache;
         wrapped = fixture.packages.${system}.ci-cache-wrapped;
         contract = fixture.packages.${system}.ci-cache-contract;
-        inherit policy;
-        denyPolicy = pkgs.writeShellScript "fixture-ci-cache-deny" "exit 1";
-        errorPolicy = pkgs.writeShellScript "fixture-ci-cache-error" "exit 2";
+        inherit policy denyPolicy errorPolicy;
+        # Linux build sandboxes expose declared store paths, not the host DB.
+        # Import authentic exported metadata into a throwaway runner database
+        # so packaging-reference assertions and executable registration checks
+        # remain real registry queries on both native platforms.
+        runnerClosure = pkgs.closureInfo {
+          rootPaths = [
+            fixture.packages.${system}.ci-cache-wrapped
+            fixture.packages.${system}.ci-cache-contract
+            policy
+            denyPolicy
+            errorPolicy
+          ];
+        };
         # Off PATH on purpose: the suite proves the config-file wrapper is
         # in force and that the fallback disables it.
         sccacheBin = "${pkgs.sccache}/bin";
