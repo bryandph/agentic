@@ -2,14 +2,13 @@
 Run: python3 ci-cache-gate.py /path/to/bash /path/to/agentic-ci-cache.sh
 """
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 
-bash, source = sys.argv[1:]
+bash, source = sys.argv[1:3]
 root = "/nix/store/" + "0" * 32 + "-fixture"
 ref = "/nix/store/" + "1" * 32 + "-reference"
 count = 0
@@ -18,11 +17,21 @@ with tempfile.TemporaryDirectory() as tmp:
     bin_dir = d / "bin"
     bin_dir.mkdir()
     # Isolated capability set, so missing-tool is genuinely absent.
-    for name in ("jq", "date", "cat", "mktemp", "chmod", "rm", "sort", "cmp", "grep", "env", "tr", "sed", "uname"):
+    for name in ("jq", "date", "cat", "mktemp", "chmod", "rm", "sort", "cmp", "grep", "env", "tr", "sed", "uname", "timeout", "sleep"):
         p = shutil.which(name)
         if not p:
             raise RuntimeError(f"missing test dependency: {name}")
         (bin_dir / name).symlink_to(p)
+    for name in ("sort", "chmod", "jq"):
+        original = shutil.which(name)
+        (bin_dir / name).unlink()
+        (bin_dir / name).write_text(f'''#!{bash}
+if [ "${{FAULT_TOOL:-}}" = {name!r} ]; then
+  if [ {name!r} != jq ] || [ "$1" = -nc ]; then echo SECRET >&2; exit 42; fi
+fi
+exec {original!r} "$@"
+''')
+        (bin_dir / name).chmod(0o755)
     marker = d / "copied"
     scanned = d / "scanned"
     policy_script = d / "policy"
@@ -34,6 +43,9 @@ case "$POLICY_MODE" in
  deny) echo SECRET >&2; exit 1 ;;
  error) echo SECRET; exit 2 ;;
  other) exit 42 ;;
+ hang) sleep 10 ;;
+ ignore-term) trap '' TERM; sleep 10 ;;
+ stdin) if IFS= read -r line; then exit 0; else exit 2; fi ;;
  mutate) chmod 600 "${{@: -1}}"; printf '%s\\n' "$REF" >> "${{@: -1}}" ;;
 esac
 printf '%s\\n' "$@" > "$SCANNED"
@@ -42,7 +54,9 @@ cat "${{@: -1}}" >> "$SCANNED"
     store = bin_dir / "nix-store"
     store.write_text(f'''#!{bash}
 case "$1" in
- --check-validity) [ "$QUERY_MODE" != unregistered ]; exit $? ;;
+ --check-validity)
+ printf '%s\\n' "$*" >> "$VALIDITY_LOG"
+ [ "$QUERY_MODE" != unregistered ] && [ "$QUERY_MODE" != unregistered-policy ]; exit $? ;;
  --query)
  n=0; if [ -f "$QUERY_COUNTER" ]; then n="$(cat "$QUERY_COUNTER")"; fi
  n=$((n + 1)); echo "$n" > "$QUERY_COUNTER"
@@ -56,6 +70,7 @@ case "$1" in
  missing-root) echo "$REF"; exit 0 ;;
  malformed) echo garbage; exit 0 ;;
  subpath) echo "$ROOT/bin"; exit 0 ;;
+ drv) printf '%s\\n' "$ROOT" "$REF.drv"; exit 0 ;;
  traversal) echo "$ROOT/../$REF"; exit 0 ;;
  incomplete)
    if [ "$n" -eq 1 ]; then echo "$ROOT"; else printf '%s\\n' "$ROOT" "$REF"; fi; exit 0 ;;
@@ -85,11 +100,12 @@ echo SECRET >&2
         "publicationPolicy": policy}}}
 
     def run(tier, query="valid", policy_mode="allow", changes=None, roots=None,
-            copied=False, copy_mode="ok"):
+            copied=False, copy_mode="ok", fault="", bound="2000"):
         global count
         marker.unlink(missing_ok=True)
         scanned.unlink(missing_ok=True)
         (d / "query-counter").unlink(missing_ok=True)
+        (d / "validity-log").unlink(missing_ok=True)
         (d / "policy-mode").write_text(policy_mode)
         contract = json.loads(json.dumps(base))
         if changes:
@@ -100,15 +116,17 @@ echo SECRET >&2
                "QUERY_MODE": query, "POLICY_MODE": policy_mode,
                "ROOT": root, "REF": ref, "MARKER": str(marker),
                "SCANNED": str(scanned), "COPY_MODE": copy_mode,
-               "QUERY_COUNTER": str(d / "query-counter")}
+               "QUERY_COUNTER": str(d / "query-counter"),
+               "VALIDITY_LOG": str(d / "validity-log"), "FAULT_TOOL": fault,
+               "AGENTIC_NIX_PUBLISH_MAX_PATHS": bound}
         p = subprocess.run([bash, "-euo", "pipefail", source, "nix", "publish",
                             *(roots if roots is not None else [root])],
-                           env=env, text=True, capture_output=True)
+                           env=env, text=True, input="DO-NOT-INHERIT-STDIN\n", capture_output=True, timeout=12)
         assert p.returncode == 0, (query, policy_mode, p.returncode, p.stderr)
         lines = p.stdout.splitlines()
         assert len(lines) == 1, (query, policy_mode, p.stdout)
         report = json.loads(lines[0])
-        assert marker.exists() == copied, (tier, query, policy_mode, report)
+        assert marker.exists() == copied, (tier, query, policy_mode, report, p.stderr)
         assert "SECRET" not in p.stdout + p.stderr, p
         assert report["trust_tier"] == tier
         if copied:
@@ -119,6 +137,7 @@ echo SECRET >&2
             assert report["policy"]["revision"] == "fixture-revision"
             assert report["policy"]["outcome"] == "allowed"
             assert report["path_count"] == 2
+            assert len((d / "validity-log").read_text().splitlines()) == 5
             assert report["outcome"] == ("failed" if copy_mode == "fail" else "published")
         else:
             assert report["outcome"] in ("failed", "refused", "skipped-bound"), report
@@ -126,23 +145,51 @@ echo SECRET >&2
         print(f"ok {count}: {tier} query={query} policy={policy_mode} copied={copied}")
         return report
 
+    if "--review-negative-control" in sys.argv[3:]:
+        for tier in ("protected", "pull-request"):
+            run(tier, changes=lambda c: c["profiles"]["nix"]["publicationPolicy"].update(
+                executableBySystem={"aarch64-darwin": shutil.which("false")}))
+        print("PASS resolved-only policy control on both tiers")
+        sys.exit(0)
+
     for tier in ("protected", "pull-request"):
         run(tier, policy_mode="deny")
         run(tier, copied=True)
         run(tier, copied=True, copy_mode="fail")
         for mode in ("fail", "partial", "mixed", "nul", "cr", "empty", "missing-root", "malformed",
-                     "subpath", "traversal", "unregistered", "incomplete", "drift"):
+                     "subpath", "traversal", "drv", "unregistered", "unregistered-policy", "incomplete", "drift"):
             run(tier, query=mode)
         run(tier, query="short", roots=[root, ref])
-        for roots in ([], ["garbage"], [root + "/bin"], [root + "/../foo"]):
+        for roots in ([], ["garbage"], [root + "/bin"], [root + "/../foo"], [root + ".drv"]):
             run(tier, roots=roots)
         for mode in ("deny", "error", "other", "mutate"):
             run(tier, policy_mode=mode)
+        r = run(tier, policy_mode="hang", changes=lambda c: c["profiles"]["nix"]["publicationPolicy"].update(timeoutSeconds=1))
+        assert r["policy"]["outcome"] == "error" and r["policy"]["status"] == 124
+        r = run(tier, policy_mode="ignore-term", changes=lambda c: c["profiles"]["nix"]["publicationPolicy"].update(timeoutSeconds=1))
+        assert r["policy"]["outcome"] == "error" and r["policy"]["status"] in (124, 137)
+        r = run(tier, policy_mode="stdin")
+        assert r["policy"]["status"] == 2
+        # Unresolved map-deny/static-allow must refuse; even empty maps refuse.
+        for mapping in ({"aarch64-darwin": "/nix/store/strict-deny"}, {}):
+            run(tier, changes=lambda c, m=mapping: c["profiles"]["nix"]["publicationPolicy"].update(executableBySystem=m))
+        for fault in ("sort", "chmod"):
+            run(tier, fault=fault)
+        run(tier, policy_mode="deny", fault="jq")
+        r = run(tier, bound="0")
+        assert r["outcome"] == "skipped-bound"
+        assert len((d / "validity-log").read_text().splitlines()) == 2
+        run(tier, bound="bad")
         run(tier, changes=lambda c: c["profiles"]["nix"].pop("publicationPolicy"))
         for bad in (None, {}, "shell command", {**policy, "version": 2},
+                    {**policy, "timeoutSeconds": 0}, {**policy, "timeoutSeconds": 301},
+                    {**policy, "timeoutSeconds": "1"}, {**policy, "timeoutSeconds": 1.5},
+                    {**policy, "timeoutSeconds": None}, {**policy, "timeoutSeconds": False},
+                    {**policy, "identity": ""}, {**policy, "revision": ""},
                     {**policy, "argv": "eval me"}, {**policy, "argv": [1]},
                     {**policy, "argv": ["--closure-file", "/tmp/alternate"]},
                     {**policy, "argv": ["--closure-file=/tmp/alternate"]},
+                    {**policy, "argv": ["--closure-fil", "/tmp/alternate"]},
                     {**policy, "argv": ["--", root]},
                     {**policy, "argv": [root]},
                     {**policy, "argv": ["bad\u0000argument"]},
@@ -156,11 +203,12 @@ echo SECRET >&2
         run(tier, copied=True, changes=lambda c: c["profiles"]["nix"]["publicationPolicy"]["argv"].append(injection))
         assert injection in scanned.read_text()
         assert not (d / "injected").exists()
-        store.rename(bin_dir / "hidden-store")
-        try:
-            run(tier)
-        finally:
-            (bin_dir / "hidden-store").rename(store)
+        for capability in (store, nix, bin_dir / "timeout"):
+            capability.rename(bin_dir / "hidden-capability")
+            try:
+                run(tier)
+            finally:
+                (bin_dir / "hidden-capability").rename(capability)
         # Producer no-work deliberately does not call writer.
         queue = []
         marker.unlink(missing_ok=True)

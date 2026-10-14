@@ -66,7 +66,6 @@
         environmentProfiles.nix
         // {
           publicationPolicy = {
-            executable = "${pkgs.coreutils}/bin/false";
             executableBySystem.${system} = "${pkgs.hello}/bin/hello";
             identity = "fixture-mapped-policy";
             revision = "fixture-revision";
@@ -79,20 +78,48 @@
         environmentProfiles.nix
         // {
           publicationPolicy = {
-            executable = "${pkgs.hello}/bin/hello";
             executableBySystem.unmatched-system = "${pkgs.coreutils}/bin/true";
             identity = "fixture-missing-architecture";
             revision = "fixture-revision";
           };
         };
     };
+    ambiguousPolicy = mkFixture {
+      requestedProfiles = ["nix"];
+      profiles.nix =
+        environmentProfiles.nix
+        // {
+          publicationPolicy = {
+            executable = "${pkgs.hello}/bin/hello";
+            executableBySystem.${system} = "${pkgs.coreutils}/bin/false";
+            identity = "fixture-ambiguous-policy";
+            revision = "fixture-revision";
+          };
+        };
+    };
+    blankIdentity = mkFixture {
+      requestedProfiles = ["nix"];
+      profiles.nix =
+        environmentProfiles.nix
+        // {
+          publicationPolicy = {
+            executable = "${pkgs.hello}/bin/hello";
+            identity = "";
+            revision = "fixture-revision";
+          };
+        };
+    };
+    blankResult = builtins.tryEval (builtins.deepSeq blankIdentity.agenticCacheProbe true);
+    ambiguousResult = builtins.tryEval (builtins.deepSeq ambiguousPolicy.agenticCacheProbe true);
     mappedContract = mappedPolicy.agenticCacheProbeFor pkgs;
     missingContract = missingArchitecture.agenticCacheProbeFor pkgs;
 
     contractFile = name: fixture:
       pkgs.writeText "agentic-ci-cache-${name}.json" (builtins.toJSON fixture.agenticCacheProbe);
   in {
-    checks.ci-cache-contracts = assert mappedContract.profiles.nix.publicationPolicy.executable == "${pkgs.hello}/bin/hello";
+    checks.ci-cache-contracts = assert !blankResult.success;
+    assert !ambiguousResult.success;
+    assert mappedContract.profiles.nix.publicationPolicy.executable == "${pkgs.hello}/bin/hello";
     assert !(mappedContract.profiles.nix.publicationPolicy ? executableBySystem);
     assert missingContract.profiles.nix.publicationPolicy.executable == null;
     assert builtins.hasContext (builtins.toJSON mappedContract);

@@ -105,21 +105,37 @@ trust tier. Its version-1 shape is `{ version = 1; executable = lib.getExe
 policyPackage; argv = []; identity = "consumer-policy"; revision = "<pinned-rev>";
 }` for an explicitly single-runtime contract. For flake-global configuration,
 use `executableBySystem = { x86_64-linux = lib.getExe linuxPolicy; aarch64-darwin =
-lib.getExe darwinPolicy; };` instead of `executable`. A nonempty map takes
-precedence, selecting exactly `pkgs.stdenv.hostPlatform.system`. Missing system
+lib.getExe darwinPolicy; };` instead of `executable`. Static `executable` and a
+nonempty map are mutually exclusive. Resolution selects exactly
+`pkgs.stdenv.hostPlatform.system`. Missing system
 entries resolve null and refuse writes, never borrow another architecture's
 policy. The map remains JSON-serializable in global metadata, but is removed
-from `contractFor pkgs` / runtime JSON. Preserve executable Nix string context;
+from `contractFor pkgs` / runtime JSON. The writer refuses any policy that still
+contains `executableBySystem`, even an empty map: unresolved global metadata must
+never be used as an executable runtime contract. Preserve Nix string context;
 the generic layer does not supply a content policy.
 The client invokes the executable with literal `argv`, then `--closure-file
 <file>` containing the canonical, registered, complete closure snapshot. Policy
 exit 0 allows that snapshot, exit 1 denies it, and every other status is an error.
 Pinned `argv` may configure the trusted adapter, but cannot contain reserved
-`--closure-file` arguments, `--`, or direct `/nix/store/` inputs. Adapter-specific
-arguments must not select another source or bypass snapshot validation; the
-adapter is trusted policy code, not an arbitrary scanner command.
+`--closure-fil*` arguments, `--`, or direct `/nix/store/` inputs. These checks
+catch common mistakes; they are **not** a security boundary for arbitrary CLI
+syntax (prefix aliases, value-taking options and alternate path spellings).
+Adapter-specific arguments must not select another source or bypass snapshot
+validation. Pinning the executable alone does not pin a mutable script/config
+referenced by argv; package those dependencies inside an immutable adapter
+wrapper and retain their Nix context. The offline fixture's Bash plus temporary
+script is intentionally synthetic, not a production policy pattern. The adapter
+is trusted policy code, not an arbitrary scanner command.
+
+Policy stdin is closed. `timeoutSeconds` defaults to 60 (integer 1–300), with a
+5-second kill grace for an adapter ignoring termination. Timeout and all other
+nonzero statuses mean zero copies and policy outcome `error` (except explicit
+exit-1 denial). Unexpected writer setup/report failures also exit 0 with one
+minimal credential-free failure report; they never resume copying.
 Missing/malformed/unexecutable policies, failed/partial/empty closure queries,
-missing roots and snapshot drift cause **zero copies**, with an exit-0 refusal
+missing roots, `.drv` roots/entries and snapshot drift cause **zero copies**,
+with an exit-0 refusal
 or failure report. Direct empty input fails; producers must explicitly skip
 legitimate no-work queues rather than call the writer without roots.
 
@@ -130,6 +146,10 @@ policy's dependencies in its own closure. Raw policy/query/copy output is
 suppressed to keep reports bounded and credential-free. Reports include policy
 identity, revision, outcome and exit status plus closure count. All snapshot
 paths, not a newly resolved roots list, are passed to copy after revalidation.
+Derivation (`.drv`) paths are rejected rather than interpreted as installables;
+publication is limited to completed output closures. The executable must be a
+regular executable file under a registered root in the runner's store; output
+registry queries may use a separate `NIX_REMOTE` store.
 
 #### The cache client: `agentic-ci-cache`
 

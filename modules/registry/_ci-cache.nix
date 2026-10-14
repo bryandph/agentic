@@ -99,24 +99,32 @@
               executableBySystem = mkOption {
                 type = types.attrsOf types.str;
                 default = {};
-                description = "Store-pinned policy executables indexed by Nix runtime system. A nonempty map takes precedence over executable; contractFor/tools/contractFile pkgs select exactly pkgs.stdenv.hostPlatform.system. A missing system resolves null (write refusal), never another architecture's executable.";
+                description = "Store-pinned policy executables indexed by Nix runtime system; mutually exclusive with executable. contractFor/tools/contractFile pkgs select exactly pkgs.stdenv.hostPlatform.system. A missing system resolves null (write refusal), never another architecture's executable.";
               };
               argv = mkOption {
                 type = types.listOf types.str;
                 default = [];
                 description = "Literal pinned configuration arguments before --closure-file. No shell evaluation or word splitting; reserved closure-file arguments, -- and direct store-root inputs are rejected. The trusted adapter must always validate the supplied snapshot.";
               };
+              timeoutSeconds = mkOption {
+                type = types.ints.between 1 300;
+                default = 60;
+                description = "Policy deadline in seconds; stdin is closed. A further 5-second kill grace bounds an adapter ignoring termination. Timeout is an error and prevents copy.";
+              };
               identity = mkOption {
-                type = types.str;
+                type = types.strMatching "[A-Za-z0-9._:+/-]{1,128}";
                 description = "Bounded public policy identifier (1–128 characters: letters, digits, dot, underscore, colon, plus, slash or dash).";
               };
               revision = mkOption {
-                type = types.str;
+                type = types.strMatching "[A-Za-z0-9._:+/-]{1,128}";
                 description = "Bounded immutable policy revision, using the same character set as identity.";
               };
             };
           });
           default = null;
+          apply = policy:
+            assert lib.assertMsg (policy == null || policy.executable == null || policy.executableBySystem == {})
+            "ciCache publicationPolicy: executable and executableBySystem are mutually exclusive"; policy;
           description = ''
             Required consumer content-permission gate for BOTH protected and
             pull-request publication. Missing policy, denial (exit 1), validation
