@@ -7,14 +7,6 @@ set -euo pipefail
 export HOME="$TMPDIR/home"
 mkdir -p "$HOME"
 export NIX_CONFIG="experimental-features = nix-command"
-# Never query or mutate the builder's database. Linux sandboxes have no host
-# registry, so bootstrap a private DB from Nix's declared-reference export.
-# Actual store paths remain the immutable derivation inputs under /nix/store;
-# the later payload store is independently rooted under TMPDIR.
-export NIX_STORE_DIR=/nix/store
-export NIX_STATE_DIR="$TMPDIR/runner-state" NIX_LOG_DIR="$TMPDIR/runner-log"
-mkdir -p "$NIX_STATE_DIR" "$NIX_LOG_DIR"
-NIX_REMOTE=local nix-store --load-db <"$runnerClosure/registration"
 export CI_REPO="fixture/consumer"
 export UV_PYTHON_DOWNLOADS=never UV_NO_CONFIG=1
 export CARGO_HOME="$TMPDIR/cargo-home" CARGO_INCREMENTAL=0
@@ -52,12 +44,6 @@ id="$(as_protected "$run" identity)"
 expect "standalone tool resolves the runtime contract" "$id" '.repository == "fixture/consumer" and .trust_tier == "protected" and .nix.readEndpoints == ["https://nix-cache.fixture.example"]'
 wrapped_id="$(env -u AGENTIC_CI_CACHE_CONTRACT CI_PIPELINE_EVENT=pull_request "$wrapped/bin/agentic-ci-cache" identity)"
 expect "pre-wired tool carries the fixture contract" "$wrapped_id" '.trust_tier == "pull-request" and .nix.readEndpoints == ["https://nix-cache.fixture.example"]'
-override_id="$(AGENTIC_CI_CACHE_CONTRACT='{"version":1,"profiles":{}}' CI_PIPELINE_EVENT=pull_request "$wrapped/bin/agentic-ci-cache" identity)"
-expect "runtime override cannot remove the baked contract/policy" "$override_id" '.nix.readEndpoints == ["https://nix-cache.fixture.example"]'
-# Positive reference assertions detect JSON/string-context regressions.
-nix-store --query --requisites "$contract" | grep -Fxq "$policy" || fail "policy missing from contract closure"
-nix-store --query --requisites "$wrapped" | grep -Fxq "$policy" || fail "policy missing from wrapper closure"
-pass "pinned policy context survives contract and wrapper packaging"
 branch_id="$(as_branch "$run" identity)"
 expect "a non-protected branch resolves to the pull-request tier" "$branch_id" '.trust_tier == "pull-request"'
 if AGENTIC_CI_TRUST_TIER=admin "$run" identity >/dev/null 2>&1; then fail "invalid tier override accepted"; fi
@@ -131,23 +117,6 @@ r="$(as_protected "$run" nix publish /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 expect "invalid store path is reported" "$r" '.outcome == "failed" and .path_count == 0'
 r="$(as_protected "$run" nix publish 2>/dev/null)"
 expect "no paths is reported" "$r" '.outcome == "failed"'
-missing_policy_contract="$(jq -c 'del(.profiles.nix.publicationPolicy)' "$AGENTIC_CI_CACHE_CONTRACT")"
-for lane in protected pull-request; do
-  r="$(AGENTIC_CI_TRUST_TIER="$lane" AGENTIC_CI_CACHE_CONTRACT="$missing_policy_contract" "$run" nix publish "$path" 2>/dev/null)"
-  expect "$lane rejects missing policy in a real store" "$r" '.outcome == "refused" and .policy.outcome == "not-run"'
-done
-for lane in protected pull-request; do
-  for gate in "$denyPolicy" "$errorPolicy"; do
-    gate_contract="$(jq -c --arg gate "$gate" --arg target "file://$bc/no-copy" '
-      .profiles.nix.publicationPolicy.executable = $gate
-      | .profiles.nix.protectedWriteEndpoint = ($target + "/protected")
-      | .profiles.nix.pullRequestWriteEndpoint = ($target + "/quarantine")
-    ' "$AGENTIC_CI_CACHE_CONTRACT")"
-    r="$(AGENTIC_CI_TRUST_TIER="$lane" AGENTIC_CI_CACHE_CONTRACT="$gate_contract" "$run" nix publish "$path" 2>/dev/null)"
-    expect "$lane real pinned policy denies/fails without copy" "$r" '(.outcome == "refused" or .outcome == "failed") and (.policy.status == 1 or .policy.status == 2)'
-    [ ! -e "$bc/no-copy" ] || fail "policy refusal still wrote a cache"
-  done
-done
 broken_contract="$(jq -c '.profiles.nix.protectedWriteEndpoint = "file:///dev/null/nope"' "$AGENTIC_CI_CACHE_CONTRACT")"
 r="$(AGENTIC_CI_CACHE_CONTRACT="$broken_contract" as_protected "$run" nix publish "$path" 2>/dev/null)"
 expect "unwritable protected backend is a reported failure" "$r" '.outcome == "failed" and (.detail | contains("status 1"))'

@@ -336,73 +336,16 @@ cleanup_netrc() {
   return 0
 }
 
-# Validate syntax before asking Nix: Nix normalizes subpaths and dot paths.
-nix_canonical_path() {
-  [[ "$1" =~ ^/nix/store/[0123456789abcdfghijklmnpqrsvwxyz]{32}-[A-Za-z0-9+._?=-]+$ && "$1" != *.drv ]]
-}
-
-nix_snapshot_syntax() {
-  local file="$1" status=0
-  [ -s "$file" ] || return 1
-  # Bash read/mapfile discard NUL bytes. Reject malformed bytes BEFORE reading
-  # so the scanned file and literal copy arguments cannot name different paths.
-  LC_ALL=C grep -aEv '^/nix/store/[0123456789abcdfghijklmnpqrsvwxyz]{32}-[A-Za-z0-9+._?=-]+$' "$file" >/dev/null 2>&1 || status=$?
-  [ "$status" -eq 1 ] || return 1
-  status=0
-  LC_ALL=C grep -aE '\.drv$' "$file" >/dev/null 2>&1 || status=$?
-  [ "$status" -eq 1 ]
-}
-
-nix_snapshot_valid() {
-  local -a members=()
-  nix_snapshot_syntax "$1" || return 1
-  mapfile -t members <"$1" || return 1
-  # Batch validity checks: no O(closure size) process spawning.
-  nix-store --check-validity "${members[@]}" >/dev/null 2>&1
-}
-
-# One bounded report, never raw query/policy/copy output (which can contain
-# credentials). Identity/revision are validated public metadata, not argv.
-nix_publication_report() {
-  local extra
-  extra="$(jq -nc --argjson count "${#paths[@]}" --argjson policy "$policy_metadata" \
-    '{path_count: $count, policy: $policy}')"
-  report publication-result nix-cache-publication "$target" "$1" "$2" "$extra"
-  publication_reported=1
-}
-
-nix_publication_cleanup() {
-  local status="$1"
-  cleanup_netrc >/dev/null 2>&1 || true
-  if [ -n "$snapshot_dir" ]; then rm -rf -- "$snapshot_dir" >/dev/null 2>&1 || true; fi
-  if [ "$status" -ne 0 ] && [ "$publication_reported" -eq 0 ]; then
-    # No jq dependency: a failed jq/sort/chmod/redirection must still produce
-    # exactly one safe report and exit 0. Never resume publication after error.
-    printf '{"report":"publication-result","component":"nix-cache-publication","trust_tier":"%s","backend":"none","outcome":"failed","detail":"publication failed unexpectedly; no further copies attempted","path_count":0,"policy":{"version":1,"outcome":"error"}}\n' "$TRUST_TIER"
-  fi
-  exit 0
-}
-
-# A subshell bounds temporary files and credentials to this publication.
-nix_publish() (
-  local profile target other_target scheme paths=() max copy_status=0 detail
-  local policy policy_executable policy_root policy_status=0 query_status=0 timeout_seconds
-  # EXIT runs after function locals are unwound; these are subshell-scoped.
-  snapshot_dir=""
-  publication_reported=0
-  local policy_metadata='{"version":1,"outcome":"not-run"}'
-  local -a nix_opts=() policy_argv=() policy_env=()
-  # EXIT (not a caller || guard) retains errexit inside the publication body.
-  # A caller guard would disable Bash errexit and let failed setup reach copy.
-  trap 'nix_publication_cleanup "$?"' EXIT
+nix_publish() {
+  local profile target other_target scheme paths=() max copy_status=0 detail query_file query_status=0
+  local -a nix_opts=()
   profile="$(profile_json nix)"
   if [ -z "$profile" ]; then
     report publication-result nix-cache-publication none skipped "nix profile is not part of the contract"
     return 0
   fi
   if [ "$#" -eq 0 ]; then
-    target=none
-    nix_publication_report failed "no completed output paths were supplied"
+    report publication-result nix-cache-publication none failed "no completed output paths were supplied"
     return 0
   fi
 
@@ -422,143 +365,12 @@ nix_publish() (
     }
   fi
   if [ -n "$other_target" ] && [ "$target" = "$other_target" ]; then
-    nix_publication_report refused "protected and pull-request write endpoints are identical; trust tiers must not share a Nix publication target"
+    report publication-result nix-cache-publication "$target" refused "protected and pull-request write endpoints are identical; trust tiers must not share a Nix publication target"
     return 0
   fi
 
   scheme="${target%%://*}"
-  policy="$(pget "$profile" .publicationPolicy)"
-  if ! jq -e '
-    type == "object" and .version == 1 and (has("executableBySystem") | not)
-    and ((if has("timeoutSeconds") then .timeoutSeconds else 60 end) | type == "number" and . == floor and . >= 1 and . <= 300)
-    and (.executable | type == "string" and test("^/nix/store/[0123456789abcdfghijklmnpqrsvwxyz]{32}-[A-Za-z0-9+._?=-]+(/[A-Za-z0-9+_./=-]+)?$")
-      and (split("/") | all(. != ".." and . != ".")))
-    and (.argv | type == "array" and length <= 64 and all(.[]; type == "string" and length <= 4096 and (contains("\u0000") | not)
-      and . != "--" and (startswith("--closure-fil") | not)
-      and (startswith("/nix/store/") | not)))
-    and (.identity | type == "string" and test("^[A-Za-z0-9._:+/-]{1,128}$"))
-    and (.revision | type == "string" and test("^[A-Za-z0-9._:+/-]{1,128}$"))
-  ' <<<"$policy" >/dev/null 2>&1; then
-    nix_publication_report refused "required version-1 publication policy is missing or malformed"
-    return 0
-  fi
-  policy_metadata="$(jq -c '{version, identity, revision, outcome: "not-run"}' <<<"$policy")"
-  policy_executable="$(pget "$policy" .executable)"
-  timeout_seconds="$(jq -r '.timeoutSeconds // 60' <<<"$policy")"
-  if [ ! -f "$policy_executable" ] || [ ! -x "$policy_executable" ]; then
-    nix_publication_report refused "required publication policy executable is unavailable"
-    return 0
-  fi
-  if ! command -v nix-store >/dev/null 2>&1 || ! command -v nix >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then
-    nix_publication_report failed "required local store capability is unavailable"
-    return 0
-  fi
-  policy_root="${policy_executable#/nix/store/}"
-  policy_root="/nix/store/${policy_root%%/*}"
-  # The executable runs in this machine's store, not the optional alternate
-  # NIX_REMOTE store whose output closure we query (e.g. isolated test store).
-  if ! env -u NIX_REMOTE nix-store --check-validity "$policy_root" >/dev/null 2>&1; then
-    nix_publication_report refused "required policy executable has no registered store root"
-    return 0
-  fi
-  local root
-  for root in "$@"; do
-    if ! nix_canonical_path "$root"; then
-      nix_publication_report failed "output root is not a canonical registered store path"
-      return 0
-    fi
-  done
-  if ! nix-store --check-validity "$@" >/dev/null 2>&1; then
-    nix_publication_report failed "output roots are not registered in the local store"
-    return 0
-  fi
-  if ! snapshot_dir="$(mktemp -d)"; then
-    nix_publication_report failed "unable to create closure snapshot"
-    return 0
-  fi
-  # NUL-separated literal arguments; capture jq status rather than hiding it
-  # behind process substitution. Any encoding/read failure exits before copy.
-  jq -j '.argv[] | . + "\u0000"' <<<"$policy" >"$snapshot_dir/argv"
-  mapfile -d '' -t policy_argv <"$snapshot_dir/argv"
-  # Capture the command status itself, including partial-output failures.
-  if nix-store --query --requisites "$@" >"$snapshot_dir/query" 2>/dev/null; then
-    query_status=0
-  else
-    query_status=$?
-  fi
-  if [ "$query_status" -ne 0 ]; then
-    nix_publication_report failed "authoritative closure query failed with status $query_status"
-    return 0
-  fi
-  if ! nix_snapshot_syntax "$snapshot_dir/query"; then
-    nix_publication_report failed "closure query returned an empty, malformed, or derivation snapshot"
-    return 0
-  fi
-  LC_ALL=C sort -u "$snapshot_dir/query" >"$snapshot_dir/closure"
-  mapfile -t paths <"$snapshot_dir/closure"
-  for root in "$@"; do
-    if ! grep -Fxq -- "$root" "$snapshot_dir/closure"; then
-      nix_publication_report failed "closure snapshot omits an output root"
-      return 0
-    fi
-  done
-  max="${AGENTIC_NIX_PUBLISH_MAX_PATHS:-2000}"
-  if [[ ! "$max" =~ ^[0-9]{1,9}$ ]]; then
-    nix_publication_report failed "invalid closure publication bound"
-    return 0
-  fi
-  if [ "${#paths[@]}" -gt "$((10#$max))" ]; then
-    report publication-result nix-cache-publication "$target" skipped-bound "closure exceeds the publication bound" \
-      "$(jq -nc --argjson count "${#paths[@]}" --argjson bound "$((10#$max))" --argjson policy "$policy_metadata" '{path_count: $count, bound: $bound, policy: $policy}')"
-    return 0
-  fi
-  if ! nix-store --check-validity "${paths[@]}" >/dev/null 2>&1; then
-    nix_publication_report failed "closure query returned an unregistered snapshot"
-    return 0
-  fi
-  # Requery every member, not just roots; exact equality proves completeness.
-  if ! nix-store --query --requisites "${paths[@]}" >"$snapshot_dir/complete" 2>/dev/null \
-    || ! nix_snapshot_valid "$snapshot_dir/complete"; then
-    nix_publication_report failed "authoritative snapshot completeness query failed"
-    return 0
-  fi
-  LC_ALL=C sort -u "$snapshot_dir/complete" >"$snapshot_dir/expected"
-  if ! cmp -s "$snapshot_dir/closure" "$snapshot_dir/expected"; then
-    nix_publication_report failed "closure snapshot is incomplete"
-    return 0
-  fi
-  chmod 400 "$snapshot_dir/closure"
-  # Policy receives no ambient credentials or shell startup variables.
-  policy_env=("PATH=$PATH" "AGENTIC_CI_CACHE_POLICY_TRUST_TIER=$TRUST_TIER" "AGENTIC_CI_CACHE_POLICY_REPOSITORY=$REPOSITORY")
-  if [ -n "${NIX_REMOTE:-}" ]; then policy_env+=("NIX_REMOTE=$NIX_REMOTE"); fi
-  if timeout --kill-after=5s "${timeout_seconds}s" env -i "${policy_env[@]}" "$policy_executable" "${policy_argv[@]}" --closure-file "$snapshot_dir/closure" </dev/null >/dev/null 2>&1; then
-    policy_status=0
-  else
-    policy_status=$?
-  fi
-  case "$policy_status" in
-    0) policy_metadata="$(jq -c '.outcome = "allowed" | .status = 0' <<<"$policy_metadata")" ;;
-    1)
-      policy_metadata="$(jq -c '.outcome = "denied" | .status = 1' <<<"$policy_metadata")"
-      nix_publication_report refused "publication policy denied the closure"
-      return 0 ;;
-    *)
-      policy_metadata="$(jq -c --argjson status "$policy_status" '.outcome = "error" | .status = $status' <<<"$policy_metadata")"
-      nix_publication_report failed "publication policy failed with status $policy_status"
-      return 0 ;;
-  esac
-  # Detect file mutation and newly introduced/unscanned references before copy.
-  if ! cmp -s "$snapshot_dir/closure" "$snapshot_dir/expected" \
-    || ! nix-store --query --requisites "${paths[@]}" >"$snapshot_dir/final" 2>/dev/null \
-    || ! nix_snapshot_valid "$snapshot_dir/final"; then
-    nix_publication_report failed "scanned closure snapshot changed or became unavailable"
-    return 0
-  fi
-  LC_ALL=C sort -u "$snapshot_dir/final" >"$snapshot_dir/final-sorted"
-  if ! cmp -s "$snapshot_dir/closure" "$snapshot_dir/final-sorted"; then
-    nix_publication_report failed "scanned closure snapshot gained unscanned references"
-    return 0
-  fi
+  trap cleanup_netrc EXIT
 
   case "$scheme" in
     http | https)
@@ -569,7 +381,7 @@ nix_publish() (
         nix_opts+=(--option netrc-file "${!netrc_file}")
       elif token="$(secret_value "$TRUST_TIER" NIX_CACHE_TOKEN)"; then
         if ! credential_split_ok NIX_CACHE_TOKEN; then
-          nix_publication_report refused "$SPLIT_DETAIL"
+          report publication-result nix-cache-publication "$target" refused "$SPLIT_DETAIL"
           return 0
         fi
         login="${prefix}NIX_CACHE_LOGIN"
@@ -578,17 +390,17 @@ nix_publish() (
         printf 'machine %s login %s password %s\n' "$(nix_url_host "$target")" "${!login:-ci}" "$token" >"$NETRC"
         nix_opts+=(--option netrc-file "$NETRC")
       else
-        nix_publication_report failed "$TRUST_TIER cache credential unavailable (expected ${prefix}NIX_NETRC_FILE or ${prefix}NIX_CACHE_TOKEN[_FILE])"
+        report publication-result nix-cache-publication "$target" failed "$TRUST_TIER cache credential unavailable (expected ${prefix}NIX_NETRC_FILE or ${prefix}NIX_CACHE_TOKEN[_FILE])"
         return 0
       fi
       ;;
     s3)
       if ! credential_split_ok AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; then
-        nix_publication_report refused "$SPLIT_DETAIL"
+        report publication-result nix-cache-publication "$target" refused "$SPLIT_DETAIL"
         return 0
       fi
       if ! export_tier_secrets AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; then
-        nix_publication_report failed "$TRUST_TIER object credential unavailable: ${MISSING_SECRETS[*]}"
+        report publication-result nix-cache-publication "$target" failed "$TRUST_TIER object credential unavailable: ${MISSING_SECRETS[*]}"
         return 0
       fi
       if secret_present "$TRUST_TIER" AWS_SESSION_TOKEN; then
@@ -597,26 +409,61 @@ nix_publish() (
       ;;
     file) ;;
     *)
-      nix_publication_report failed "unsupported publication endpoint scheme"
+      report publication-result nix-cache-publication "$target" failed "unsupported publication endpoint scheme '$scheme'"
       return 0
       ;;
   esac
   scrub_tier_env
 
-  # Copy exactly the scanned complete snapshot. Store references are immutable;
-  # disappearance causes copy failure, never a fallback to a fresh roots query.
-  if nix copy --to "$target" "${nix_opts[@]}" "${paths[@]}" >/dev/null 2>&1; then
+  # Bounded: the closure of the supplied outputs, computed locally. No
+  # cache-status walk against the backend.
+  # A process substitution hides the query's exit status. Capture it before
+  # accepting any output, including a failed query that printed partial paths.
+  if ! query_file="$(mktemp)"; then
+    report publication-result nix-cache-publication "$target" failed "unable to query the local closure"
+    return 0
+  fi
+  if nix path-info -r "$@" >"$query_file" 2>/dev/null; then
+    if ! mapfile -t paths <"$query_file"; then
+      query_status=1
+    fi
+  else
+    query_status=$?
+  fi
+  rm -f -- "$query_file"
+  if [ "$query_status" -ne 0 ]; then
+    report publication-result nix-cache-publication "$target" failed "local closure query failed with status $query_status; nothing was published" '{"path_count": 0}'
+    return 0
+  fi
+  if [ "${#paths[@]}" -eq 0 ]; then
+    report publication-result nix-cache-publication "$target" failed "supplied paths are not valid in the local store" '{"path_count": 0}'
+    return 0
+  fi
+  max="${AGENTIC_NIX_PUBLISH_MAX_PATHS:-2000}"
+  if [[ ! "$max" =~ ^[0-9]{1,9}$ ]]; then
+    report publication-result nix-cache-publication "$target" failed "invalid closure publication bound"
+    return 0
+  fi
+  max="$((10#$max))"
+  if [ "${#paths[@]}" -gt "$max" ]; then
+    report publication-result nix-cache-publication "$target" skipped-bound "closure of ${#paths[@]} paths exceeds the publication bound of $max" "{\"path_count\": ${#paths[@]}, \"bound\": $max}"
+    return 0
+  fi
+
+  # Report the bounded status rather than raw backend diagnostics, which may
+  # include credentials. Copy normal roots using Nix's standard semantics.
+  if nix copy --to "$target" "${nix_opts[@]}" "$@" >/dev/null 2>&1; then
     copy_status=0
   else
     copy_status=$?
   fi
   if [ "$copy_status" -eq 0 ]; then
-    nix_publication_report published "scanned complete closure publication succeeded; promotion between tiers is rebuild-based"
+    report publication-result nix-cache-publication "$target" published "completed closure publication succeeded; promotion between tiers is rebuild-based" "{\"path_count\": ${#paths[@]}}"
   else
     detail="closure publication failed with status $copy_status; build result remains authoritative"
-    nix_publication_report failed "$detail"
+    report publication-result nix-cache-publication "$target" failed "$detail" "{\"path_count\": ${#paths[@]}}"
   fi
-)
+}
 
 # --- sccache ------------------------------------------------------------------
 
@@ -1215,7 +1062,7 @@ main() {
         config) nix_config ;;
         publish)
           shift
-          nix_publish "$@" 2>/dev/null
+          nix_publish "$@"
           ;;
         *) usage ;;
       esac

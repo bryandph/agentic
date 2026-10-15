@@ -83,60 +83,6 @@
           description = "Inputs that select the Nix publication namespace; store paths retain their native content identity.";
         };
 
-        publicationPolicy = mkOption {
-          type = types.nullOr (types.submodule {
-            options = {
-              version = mkOption {
-                type = types.enum [1];
-                default = 1;
-                description = "Policy protocol version: literal argv followed by --closure-file and the validated complete snapshot.";
-              };
-              executable = mkOption {
-                type = types.nullOr types.str;
-                default = null;
-                description = "Explicit single-runtime store-pinned policy executable. For flake-global multi-architecture configuration use executableBySystem instead. Preserve its Nix string context (for example lib.getExe on a package); never a shell command.";
-              };
-              executableBySystem = mkOption {
-                type = types.attrsOf types.str;
-                default = {};
-                description = "Store-pinned policy executables indexed by Nix runtime system; mutually exclusive with executable. contractFor/tools/contractFile pkgs select exactly pkgs.stdenv.hostPlatform.system. A missing system resolves null (write refusal), never another architecture's executable.";
-              };
-              argv = mkOption {
-                type = types.listOf types.str;
-                default = [];
-                description = "Literal pinned configuration arguments before --closure-file. No shell evaluation or word splitting; reserved closure-file arguments, -- and direct store-root inputs are rejected. The trusted adapter must always validate the supplied snapshot.";
-              };
-              timeoutSeconds = mkOption {
-                type = types.ints.between 1 300;
-                default = 60;
-                description = "Policy deadline in seconds; stdin is closed. A further 5-second kill grace bounds an adapter ignoring termination. Timeout is an error and prevents copy.";
-              };
-              identity = mkOption {
-                type = types.strMatching "[A-Za-z0-9._:+/-]{1,128}";
-                description = "Bounded public policy identifier (1–128 characters: letters, digits, dot, underscore, colon, plus, slash or dash).";
-              };
-              revision = mkOption {
-                type = types.strMatching "[A-Za-z0-9._:+/-]{1,128}";
-                description = "Bounded immutable policy revision, using the same character set as identity.";
-              };
-            };
-          });
-          default = null;
-          apply = policy:
-            assert lib.assertMsg (policy == null || policy.executable == null || policy.executableBySystem == {})
-            "ciCache publicationPolicy: executable and executableBySystem are mutually exclusive"; policy;
-          description = ''
-            Required consumer content-permission gate for BOTH protected and
-            pull-request publication. Missing policy, denial (exit 1), validation
-            error (exit 2), or any other nonzero status prevents every copy while
-            retaining report-and-continue. Exit 0 approves only this snapshot.
-            Policy output is suppressed; identity/revision/status are reported.
-            Metadata is supplied through AGENTIC_CI_CACHE_POLICY_TRUST_TIER and
-            AGENTIC_CI_CACHE_POLICY_REPOSITORY, not scanner-specific arguments.
-            No board-specific policy or dependency is supplied by Agentic.
-          '';
-        };
-
         publicationMode = mkOption {
           type = types.enum ["completed-closures"];
           default = "completed-closures";
@@ -322,36 +268,6 @@
     };
     profiles = selectedProfiles;
   };
-
-  # Keep the global projection JSON-serializable (including the architecture
-  # map). Resolve only when a consumer supplies the runtime package set; do not
-  # serialize functions or roundtrip context-bearing executable strings.
-  contractFor = pkgs: let
-    profile = selectedProfiles.nix or null;
-    policy =
-      if profile == null
-      then null
-      else profile.publicationPolicy;
-    resolvedPolicy =
-      if policy == null
-      then null
-      else
-        (builtins.removeAttrs policy ["executableBySystem"])
-        // {
-          executable =
-            if policy.executableBySystem != {}
-            then policy.executableBySystem.${pkgs.stdenv.hostPlatform.system} or null
-            else policy.executable;
-        };
-  in
-    contract
-    // {
-      profiles =
-        selectedProfiles
-        // lib.optionalAttrs (profile != null) {
-          nix = profile // {publicationPolicy = resolvedPolicy;};
-        };
-    };
 in {
   options.agentic.ciCache = {
     requestedProfiles = mkOption {
@@ -388,19 +304,19 @@ in {
     lib = mkOption {
       type = types.raw;
       readOnly = true;
-      description = "Global JSON-serializable contract metadata (`contract`), runtime-architecture resolved contract (`contractFor pkgs`), its store file (`contractFile pkgs`), and the pre-wired client (`tools pkgs`).";
+      description = "Resolved contract (`contract`, JSON-serializable), its store file (`contractFile pkgs`), and the pre-wired client (`tools pkgs`).";
     };
   };
 
   config = {
     agentic.ciCache.lib = {
-      inherit contract contractFor;
-      # Store path of the architecture-resolved contract (public metadata only).
-      contractFile = pkgs: tool.contractFile pkgs (contractFor pkgs);
+      inherit contract;
+      # Store path of the contract JSON (public metadata only).
+      contractFile = pkgs: tool.contractFile pkgs contract;
       # `agentic-ci-cache` with this contract pre-wired; the same binary is
       # published standalone as packages.<system>.ci-cache for consumers that
       # do not import the flake module.
-      tools = pkgs: tool.mkWrappedTool pkgs (tool.mkTool pkgs) (tool.contractFile pkgs (contractFor pkgs));
+      tools = pkgs: tool.mkWrappedTool pkgs (tool.mkTool pkgs) (tool.contractFile pkgs contract);
     };
     flake.agenticCiCacheContract = contract;
   };
