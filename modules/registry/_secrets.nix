@@ -194,6 +194,10 @@ in {
       mkRunner = pkgs: {
         name,
         scopes ? cfg.scopes,
+        # Optional credential-free provider URI for this runner only (for
+        # example another mount of the same store); defaults to the configured
+        # provider. Not a per-scope or multi-backend selection.
+        provider ? cfg.secretspec.provider,
       }: let
         allScopes =
           (lib.attrValues cfg.scopes)
@@ -250,7 +254,7 @@ in {
               *) echo "${name}: unknown credential scope" >&2; exit 2 ;;
             esac
             exec ${lib.getExe package} --file ${manifest} run \
-              --provider ${lib.escapeShellArg cfg.secretspec.provider} --profile default \
+              --provider ${lib.escapeShellArg provider} --profile default \
               --reason "''${SECRETSPEC_REASON:-Start ${name} for the agentic environment}" \
               --scope "$scope" -- "$@"
           '';

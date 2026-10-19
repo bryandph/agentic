@@ -17,7 +17,10 @@ after its child exits. An empty field selects a provider's flat item reference.
 runner accepting `--scope NAME -- COMMAND [ARG...]`. It generates declarations
 only; Nix evaluation and shell entry never resolve these secrets. Missing
 required credentials prevent command launch. `SECRETSPEC_REASON` can supply
-an access reason when the user's SecretSpec policy requires one.
+an access reason when the user's SecretSpec policy requires one. An optional
+`provider` argument selects another credential-free provider URI for that
+runner only, for example another mount of the same store; omitting it keeps
+`agentic.secrets.secretspec.provider`. It is not a per-scope backend choice.
 
 MCP references and command scopes feed the same generated manifest. Scoped
 execution removes declared out-of-scope variables inherited from the caller.

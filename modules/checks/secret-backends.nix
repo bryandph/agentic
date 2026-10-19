@@ -82,6 +82,37 @@
       };
     };
 
+    # SecretSpec scoped runners: an optional per-runner provider applies to that
+    # runner only; omitting it keeps the configured provider. The stub stands in
+    # for the CLI: only the generated runner text is inspected, nothing runs.
+    secretspecStub = (pkgs.writeShellScriptBin "secretspec" "exit 1") // {version = "0.21.0";};
+    secretspecFixture = mkFixture ({config, ...}: {
+      agentic.secrets = {
+        backend = "secretspec";
+        secretspec = {
+          provider = "openbao://vault.fixture.example:8200/fixture-kv";
+          package = _: secretspecStub;
+        };
+        scopes.fixture.FIXTURE_TOKEN = {
+          path = "fixture/service";
+          field = "token";
+        };
+      };
+      perSystem = {pkgs, ...}: {
+        packages = {
+          runner-default = config.agentic.secrets.lib.mkRunner pkgs {name = "fixture-runner";};
+          runner-explicit = config.agentic.secrets.lib.mkRunner pkgs {
+            name = "fixture-runner";
+            provider = "openbao://vault.fixture.example:8200/fixture-kv";
+          };
+          runner-override = config.agentic.secrets.lib.mkRunner pkgs {
+            name = "fixture-other-runner";
+            provider = "openbao://vault.fixture.example:8200/other-kv";
+          };
+        };
+      };
+    });
+
     artifact = fixture: name: fixture.packages.${system}.${name};
   in {
     checks.secret-backends =
@@ -123,6 +154,19 @@
         test ! -s missing-output
         FIXTURE_TOKEN=fixture-token FIXTURE_API_KEY=fixture-key "$envwrapper" > present-output
         grep -qF 'Hello, world!' present-output
+
+        # secretspec runner provider: the default is exactly the configured
+        # provider (same derivation as passing it explicitly); an override
+        # changes only its own runner.
+        default=${artifact secretspecFixture "runner-default"}
+        explicit=${artifact secretspecFixture "runner-explicit"}
+        override=${artifact secretspecFixture "runner-override"}/bin/fixture-other-runner
+        test "$default" = "$explicit" || { echo "default provider changed the runner"; exit 1; }
+        expect 'openbao://vault.fixture.example:8200/fixture-kv' "$default/bin/fixture-runner"
+        forbid 'other-kv' "$default/bin/fixture-runner"
+        expect 'openbao://vault.fixture.example:8200/other-kv' "$override"
+        forbid 'fixture-kv' "$override"
+        expect '--scope "$scope"' "$override"
 
         # consumer-defined preset: resolution goes through the op CLI with
         # zero core changes.
