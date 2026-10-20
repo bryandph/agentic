@@ -34,6 +34,7 @@ in {
   _module.args.agenticInputs = {
     mcpServersSrc = "${locked "mcp-servers-nix"}";
     qmdBase = pkgs': (builtins.getFlake "github:tobi/qmd/${lock.nodes.qmd.locked.rev}").packages.${pkgs'.stdenv.hostPlatform.system}.qmd;
+    backlogBase = pkgs': (builtins.getFlake "github:MrLesk/Backlog.md/${lock.nodes.backlog-md.locked.rev}").packages.${pkgs'.stdenv.hostPlatform.system}.backlog-md or null;
   };
 
   imports = [
@@ -44,6 +45,8 @@ in {
     ./modules/registry/_serena.nix
     ./modules/registry/_knowledge-search.nix
     ./modules/registry/_knowledge.nix
+    ./modules/registry/_work-tracking.nix
+    ./modules/registry/_bundle.nix
     ./modules/registry/_agents.nix
     ./modules/registry/_memory-plane.nix
     ./modules/registry/_workmux.nix

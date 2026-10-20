@@ -42,12 +42,13 @@
         nativeBuildInputs = [pkgs.gnugrep];
         src = ../../modules;
         fragments = ../../fragments;
+        skills = ../../skills;
       } ''
         set -euo pipefail
 
         # Source scan: no BPH identity in code or shipped fragments.
         # This file is excluded — it necessarily spells the deny-list.
-        if grep -rniE '\.bph\b|git\.bph|blackdc|mandala-bph|bryandph' --exclude=org-neutral.nix "$src" "$fragments"; then
+        if grep -rniE '\.bph\b|git\.bph|blackdc|mandala-bph|bryandph' --exclude=org-neutral.nix "$src" "$fragments" "$skills"; then
           echo "org-specific identifier found in core sources (see matches above)"
           exit 1
         fi

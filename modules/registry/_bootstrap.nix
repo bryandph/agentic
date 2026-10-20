@@ -82,6 +82,8 @@
     # reads the main worktree's copy during merges, and the header
     # carries the operational rationale.
     install -m 644 ${acfg.workmuxLib.configFile pkgs} .workmux.yaml
+    # Work tracking: core-owned Backlog.md project config.
+    ${acfg.workTracking.lib.placeScript pkgs}
     ${lib.optionalString (acfg.secrets.backend == "secretspec" && acfg.secrets.managedEnvironment != []) ''
       # Clear credentials inherited from shells created before scoped delivery.
       unset ${lib.concatStringsSep " " acfg.secrets.managedEnvironment}
@@ -99,8 +101,11 @@ in {
   config.agentic.devenvLib = {
     inherit bootstrapScript managedMcpConfig projectConfigFor;
     # Workflow CLIs the shell should carry: knowledge search (the CLI
-    # equivalent Pi relies on), when the consumer declares collections.
-    packages = pkgs: lib.optional (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.wrapper pkgs);
+    # equivalent Pi relies on), when the consumer declares collections,
+    # and `backlog` when work tracking is enabled.
+    packages = pkgs:
+      lib.optional (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.wrapper pkgs)
+      ++ lib.optional (acfg.workTracking.prefix != null && acfg.workTracking.lib.package pkgs != null) (acfg.workTracking.lib.package pkgs);
 
     # The devenv module body — identical under both transports.
     shellModule = {
