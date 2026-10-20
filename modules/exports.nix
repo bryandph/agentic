@@ -44,12 +44,17 @@
       # Org-neutral language profiles (D8) — composable alongside the
       # agentic module; they never own a repo's packaging.
       inherit (config.flake.modules.devenv) rust python polyglot embedded-rust;
+      # Workspace layout (repo manifest -> mani.yaml); inert
+      # until `agentic.workspace.repos` is set.
+      inherit (config.flake.modules.devenv) workspace;
     };
 
     homeModules = {
       agentic = config.flake.modules.homeManager.agentic;
       workbench = config.flake.modules.homeManager.workbench;
       default = config.flake.modules.homeManager.agentic;
+      # Already part of `agentic`; standalone for workspace-only consumers.
+      inherit (config.flake.modules.homeManager) workspace;
     };
   };
 }
