@@ -36,6 +36,12 @@
     # chain in nixspace: follows-dedup yields a broken build here.
     qmd.url = "github:tobi/qmd";
 
+    # Work tracking (modules/registry/_work-tracking.nix): Backlog.md,
+    # markdown tasks in each repo. Not following our nixpkgs for the
+    # same reason as qmd: its bun2nix build targets its own
+    # nixos-unstable pin. Upstream ships no x86_64-darwin package.
+    backlog-md.url = "github:MrLesk/Backlog.md";
+
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";

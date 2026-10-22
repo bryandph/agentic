@@ -9,6 +9,7 @@
     _module.args.agenticInputs = {
       mcpServersSrc = "${inputs.mcp-servers-nix}";
       qmdBase = pkgs: inputs.qmd.packages.${pkgs.stdenv.hostPlatform.system}.qmd;
+      backlogBase = pkgs: inputs.backlog-md.packages.${pkgs.stdenv.hostPlatform.system}.backlog-md or null;
     };
 
     imports = [
@@ -21,6 +22,8 @@
       ./registry/_serena.nix
       ./registry/_knowledge-search.nix
       ./registry/_knowledge.nix
+      ./registry/_work-tracking.nix
+      ./registry/_bundle.nix
       ./registry/_agents.nix
       ./registry/_memory-plane.nix
       ./registry/_workmux.nix

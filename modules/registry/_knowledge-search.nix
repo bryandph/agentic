@@ -40,6 +40,12 @@
   in
     pkgs.writeScriptBin "qmd-knowledge" ''
       #!${pkgs.runtimeShell}
+      ${lib.optionalString (cfg.index == "local") ''
+        # Project-local index: qmd uses the nearest .qmd/ above the cwd,
+        # so a parent scope's index covers its children while a child
+        # never sees its parent.
+        [ -d .qmd ] || ${qmd} init >/dev/null
+      ''}
       # Register declared collections (idempotent — add failures on
       # existing collections are expected), then pass through.
       ${lib.concatStringsSep "\n" (lib.mapAttrsToList (
@@ -50,6 +56,17 @@
     '';
 in {
   options.agentic.knowledgeSearch = {
+    index = lib.mkOption {
+      type = lib.types.enum ["user" "local"];
+      default = "user";
+      description = ''
+        `user`: collections register in qmd's user-wide index.
+        `local`: the wrapper creates a project-local `.qmd/` index in the
+        repository root (git-ignore it) and registers collections there,
+        so searches from inside the repository see only its own scope.
+      '';
+    };
+
     collections = lib.mkOption {
       type = lib.types.attrsOf (lib.types.submodule {
         options.path = lib.mkOption {
