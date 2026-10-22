@@ -80,8 +80,12 @@
         grep -qF 'task_prefix: "fix"' backlog/config.yml
 
         # The configured lifecycle is enforced by upstream.
-        backlog task create "Probe" -s Planning --priority major -l fixture-subsystem --plain >/dev/null
+        backlog task create "Probe" -s Planning --priority major -l fixture-subsystem --type Epic --plain >/dev/null
         backlog task view FIX-1 --plain | grep -q "Planning"
+        grep -qi '^type: epic' backlog/tasks/*.md
+        if backlog task create "Wrong type" --type chore --plain >/dev/null 2>&1; then
+          echo "an unconfigured type was accepted"; exit 1
+        fi
         if backlog task edit FIX-1 -s "To Do" --plain >/dev/null 2>&1; then
           echo "an unconfigured status was accepted"; exit 1
         fi

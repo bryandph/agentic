@@ -27,6 +27,7 @@
     default_status: ${builtins.toJSON cfg.defaultStatus}
     statuses: ${builtins.toJSON cfg.statuses}
     priorities: ${builtins.toJSON cfg.priorities}
+    types: ${builtins.toJSON cfg.types}
     labels: ${builtins.toJSON cfg.labels}
     definition_of_done: ${builtins.toJSON cfg.definitionOfDone}
     auto_commit: false
@@ -87,6 +88,12 @@ in {
       type = lib.types.listOf lib.types.str;
       default = ["Show-stopper" "Critical" "Major" "Normal" "Minor"];
       description = "Ordered priority labels, highest first. Priority expresses consequence, not queue order.";
+    };
+
+    types = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = ["Epic" "Feature" "Task" "Bug" "Usability Problem" "Performance Problem"];
+      description = "Allowed task types. An Epic is a finishable parent whose subtasks carry the work.";
     };
 
     labels = lib.mkOption {
