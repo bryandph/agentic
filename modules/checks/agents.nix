@@ -59,6 +59,20 @@
           scope.forbidden = ["secrets/"];
           mcp = ["serena"];
         };
+
+        # Mesh-only persona: rendered for Cotal, absent from every subagent farm.
+        relay = {
+          description = ''Fixture "mesh" persona.'';
+          fragments = ["fixture-review"];
+          platforms = ["cotal"];
+          cotal = {
+            role = "relay";
+            agent = "pi";
+            subscribe = ["general"];
+            allowSubscribe = ["general" "team.>"];
+            allowPublish = ["general"];
+          };
+        };
       };
 
       agentic.instructions.scopes = {
@@ -78,6 +92,7 @@
         reviewerClaude = config.agentic.agentsLib.renderClaude "reviewer" config.agentic.agents.reviewer;
         reviewerCodex = builtins.fromTOML (config.agentic.agentsLib.renderCodex "reviewer" config.agentic.agents.reviewer);
         reviewerOpencode = config.agentic.agentsLib.renderOpencode "reviewer" config.agentic.agents.reviewer;
+        relayCotal = config.agentic.agentsLib.renderCotal "relay" config.agentic.agents.relay;
         renderedFiles = config.agentic.instructions.lib.renderedFiles;
         placeAgents = config.agentic.agentsLib.placeScript pkgs;
       };
@@ -116,11 +131,27 @@
       flake.agenticProbe.body = config.agentic.agentsLib.renderClaude "broken" config.agentic.agents.broken;
     }) "body";
 
+    cotalRoleMissingFails = failing ({config, ...}: {
+      agentic.agents.broken = {
+        description = "lists cotal without a role";
+        platforms = ["cotal"];
+      };
+      flake.agenticProbe.body = config.agentic.agentsLib.renderCotal "broken" config.agentic.agents.broken;
+    }) "body";
+
     p = fixture.agenticProbe;
 
     scopeLine = "Never read, modify, or act on: `secrets/`.";
   in {
     checks.agents-registry =
+      # Cotal persona: identity in the frontmatter, bare fragment text below it.
+      assert lib.hasInfix "Fixture review card" p.relayCotal;
+      assert !(lib.hasInfix "## Review discipline" p.relayCotal);
+      assert !(lib.hasInfix ''Fixture "mesh" persona.'' (lib.last (lib.splitString "---" p.relayCotal)));
+      assert lib.hasInfix "role: \"relay\"" p.relayCotal;
+      assert lib.hasInfix "agent: \"pi\"" p.relayCotal;
+      assert !(lib.hasInfix "model:" p.relayCotal);
+      assert cotalRoleMissingFails;
       # Capability-derived Claude grants + overrides win/augment.
       assert lib.hasInfix "Edit" p.builderClaude;
       assert lib.hasInfix "Bash" p.builderClaude;
@@ -199,6 +230,12 @@
           test -f "$roles/package.json"
           grep -qF 'Fixture conventions card' "$roles/prompts/role-builder.md"
           grep -qF 'Shell commands: not permitted' "$roles/prompts/role-reviewer.md"
+          test ! -e "$roles/prompts/role-relay.md"
+
+          # Cotal personas: only opted-in agents, parsed as YAML like Cotal does.
+          export personas=${fixture.packages.${system}.cotal-personas}
+          test -f "$personas/relay.md"
+          test ! -e "$personas/builder.md"
 
           # Real parsers catch quoting/newline errors in generated files.
           mkdir placement
@@ -224,6 +261,13 @@
           assert 'model' not in frontmatter('.claude/agents/reviewer.md')
           assert 'model' not in frontmatter('.opencode/agents/reviewer.md')
           assert set(p.stem for p in pathlib.Path('.codex/agents').glob('*.toml')) == {'builder', 'reviewer'}
+          assert not pathlib.Path('.claude/agents/relay.md').exists()
+          assert not pathlib.Path('.opencode/agents/relay.md').exists()
+          relay = frontmatter(os.environ['personas'] + '/relay.md')
+          assert relay['name'] == 'relay' and relay['role'] == 'relay' and relay['agent'] == 'pi'
+          assert relay['subscribe'] == ['general'] and relay['allowSubscribe'] == ['general', 'team.>']
+          assert relay['allowPublish'] == ['general'] and relay['tags'] == []
+          assert 'Fixture review card' in pathlib.Path(os.environ['personas'] + '/relay.md').read_text()
           # Match Codex's launch-time loader, not just its discovery parser.
           # Directory symlinks are supported; final-component symlinks are not.
           for path in pathlib.Path('.codex/agents').glob('*.toml'):
