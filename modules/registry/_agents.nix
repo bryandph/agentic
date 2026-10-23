@@ -12,6 +12,10 @@
 # Renderers (replaces nixspace modules/mcp/agent-module.nix):
 #   * Claude Code subagent markdown — `tools:` frontmatter derived from
 #     capabilities + mcp + claude.extraTools.
+#   * Cotal persona markdown (`.cotal/agents/<name>.md`) — mesh identity
+#     in the frontmatter (role, channel ACLs, connector pin), the shared
+#     body as the persona. Opt-in per agent through `platforms`, because
+#     a mesh persona is rarely also a harness subagent.
 #   * OpenCode subagent markdown — V1-SUBSET DECISION (recorded per
 #     design D5): we emit the stable V1 frontmatter (`permission:` key,
 #     files under `.opencode/agents/`) because the fleet's pinned
@@ -131,8 +135,54 @@
           description = "Per-platform override: OpenCode permission entries merged over (winning against) the derived map.";
         };
       };
+
+      platforms = lib.mkOption {
+        type = lib.types.listOf (lib.types.enum ["claude" "codex" "opencode" "pi" "cotal"]);
+        default = ["claude" "codex" "opencode" "pi"];
+        description = "Platforms this agent is rendered for. `cotal` is opt-in and needs `cotal.role`.";
+      };
+
+      cotal = {
+        role = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Cotal role: the presence label and anycast address (one `[A-Za-z0-9_-]` token). Required when `platforms` lists `cotal`.";
+        };
+        agent = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Cotal connector pin (`pi`, `claude`, ...); null lets the launcher choose.";
+        };
+        model = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Model override handed to the connector; null preserves harness model selection.";
+        };
+        tags = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          description = "Capability tags on the presence card.";
+        };
+        subscribe = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          description = "Channels joined at boot. Empty joins none.";
+        };
+        allowSubscribe = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          description = "Read ACL (wildcards such as `team.>` allowed). Empty means the same as `subscribe`.";
+        };
+        allowPublish = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          description = "Post ACL. Empty denies posting everywhere.";
+        };
+      };
     };
   };
+
+  forPlatform = platform: lib.filterAttrs (_: agent: lib.elem platform agent.platforms) cfg.agents;
 
   # --- compiled body (shared across platforms) ---------------------
 
@@ -259,6 +309,39 @@
     Task: $ARGUMENTS
   '';
 
+  # Cotal reads the frontmatter as YAML; JSON scalars and lists are valid
+  # YAML, so every operator-supplied string goes through toJSON. `name`
+  # is also the file name the launcher resolves, so they must agree. The
+  # body is appended to the agent's system prompt, so it is the bare
+  # fragment text: no description line and no section headers.
+  cotalBody = agent:
+    lib.concatStringsSep "\n" (map (fname: (cfg.knowledgeLib.fragment fname).text) agent.fragments);
+  renderCotal = name: agent: let
+    c = agent.cotal;
+  in
+    assert lib.assertMsg (c.role != null) "agentic.agents.${name}: platforms lists cotal but cotal.role is unset";
+    assert lib.assertMsg (builtins.match "[A-Za-z0-9_-]+" name != null) "agentic.agents.${name}: a Cotal persona name must be one [A-Za-z0-9_-] token"; ''
+      ---
+      name: ${name}
+      role: ${builtins.toJSON c.role}
+      description: ${builtins.toJSON agent.description}
+      tags: ${builtins.toJSON c.tags}
+      ${lib.optionalString (c.agent != null) "agent: ${builtins.toJSON c.agent}\n"}${lib.optionalString (c.model != null) "model: ${builtins.toJSON c.model}\n"}subscribe: ${builtins.toJSON c.subscribe}
+      allowSubscribe: ${builtins.toJSON c.allowSubscribe}
+      allowPublish: ${builtins.toJSON c.allowPublish}
+      ---
+
+      ${cotalBody agent}'';
+
+  cotalAgentsDir = pkgs:
+    pkgs.linkFarm "cotal-personas" (
+      lib.mapAttrsToList (name: agent: {
+        name = "${name}.md";
+        path = pkgs.writeText "${name}.md" (renderCotal name agent);
+      })
+      (forPlatform "cotal")
+    );
+
   piPackage = pkgs:
     pkgs.linkFarm "pi-agent-roles" (
       [
@@ -274,16 +357,16 @@
         name = "prompts/role-${name}.md";
         path = pkgs.writeText "role-${name}.md" (renderPi name agent);
       })
-      cfg.agents
+      (forPlatform "pi")
     );
 
-  agentsDir = render: extension: farmName: pkgs:
+  agentsDir = platform: render: extension: farmName: pkgs:
     pkgs.linkFarm farmName (
       lib.mapAttrsToList (n: agent: {
         name = "${n}.${extension}";
         path = pkgs.writeText "${n}.${extension}" (render n agent);
       })
-      cfg.agents
+      (forPlatform platform)
     );
 
   # Codex discovers symlinked files but opens role files with O_NOFOLLOW
@@ -295,7 +378,7 @@
       ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: agent: ''
           cp ${pkgs.writeText "${name}.toml" (renderCodex name agent)} "$out"/${lib.escapeShellArg "${name}.toml"}
         '')
-        cfg.agents)}
+        (forPlatform "codex"))}
     '';
 
   # Check every destination before changing any of them. Never nest a
@@ -318,9 +401,9 @@
     # Relink only on change: agent sandboxes (Codex) may forbid writes
     # under .codex/ even when the link is already current.
     agentic_link() { [ "$(readlink "$2" 2>/dev/null)" = "$1" ] || ln -sfn "$1" "$2"; }
-    agentic_link ${agentsDir renderClaude "md" "claude-agents" pkgs} .claude/agents
+    agentic_link ${agentsDir "claude" renderClaude "md" "claude-agents" pkgs} .claude/agents
     agentic_link ${codexAgentsDir pkgs} .codex/agents
-    agentic_link ${agentsDir renderOpencode "md" "opencode-agents" pkgs} .opencode/agents
+    agentic_link ${agentsDir "opencode" renderOpencode "md" "opencode-agents" pkgs} .opencode/agents
   '';
 in {
   options.agentic = {
@@ -341,15 +424,17 @@ in {
         helpers `claudeTools` / `opencodePermission`. Codex: `renderCodex`,
         `codexAgentsDir pkgs` (standalone .codex/agents/*.toml roles).
         `placeScript pkgs` safely places project agent directories. Pi: `renderPi`,
-        `piPackage pkgs` (local package of /role-<name> prompt templates),
-        and `compileBody` (the shared body before platform framing).
+        `piPackage pkgs` (local package of /role-<name> prompt templates).
+        Cotal: `renderCotal`, `cotalAgentsDir pkgs` (link farm of
+        `.cotal/agents/<name>.md` personas for agents whose `platforms`
+        list `cotal`). `compileBody` is the shared body before platform framing.
       '';
     };
   };
 
   config.agentic.agentsLib = {
-    inherit compileBody renderClaude renderCodex renderOpencode renderPi piPackage claudeTools opencodePermission placeScript codexAgentsDir;
-    claudeAgentsDir = agentsDir renderClaude "md" "claude-agents";
-    opencodeAgentsDir = agentsDir renderOpencode "md" "opencode-agents";
+    inherit compileBody renderClaude renderCodex renderOpencode renderPi renderCotal piPackage cotalAgentsDir claudeTools opencodePermission placeScript codexAgentsDir;
+    claudeAgentsDir = agentsDir "claude" renderClaude "md" "claude-agents";
+    opencodeAgentsDir = agentsDir "opencode" renderOpencode "md" "opencode-agents";
   };
 }

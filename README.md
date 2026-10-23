@@ -79,6 +79,17 @@ subagent or automatic model switch. Codex roles inherit their parent's sandbox;
 capabilities are not a universal security boundary. Codex's launch-time reader
 rejects individual role symlinks, so its directory contains regular TOML files.
 
+`platforms` selects where an agent is rendered (default: the four harnesses).
+An agent that lists `cotal` and sets `cotal.role` becomes a Cotal persona
+(`.cotal/agents/<name>.md`): mesh identity and channel ACLs
+(`cotal.{role,agent,model,tags,subscribe,allowSubscribe,allowPublish}`) in the
+frontmatter, and the agent's fragment text, bare, as the persona body (it is
+appended to the system prompt). `packages.<system>.cotal-personas`
+is the link farm; the environment places it at its space root, since a persona
+catalog belongs to a mesh, not a project. No Cotal capability (`spawn`, `run`)
+is rendered: those address a Cotal manager, and starting agents is the
+environment's launcher concern.
+
 ### CI cache profile contract
 
 Environment layers may define `agentic.ciCache.profiles.{nix,rust,python}`.
