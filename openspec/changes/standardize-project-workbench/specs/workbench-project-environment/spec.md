@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Shared mechanics and domain behavior have separate owners
-Workbench SHALL own reusable project mechanics that can serve multiple repository archetypes: shell bootstrap, language/tool profiles, formatting/check hooks, workflow registries, generated project artifacts, Workmux lifecycle primitives, and adapter delivery. A consuming repository SHALL retain its package construction, application services, processes, domain commands, deployment actions, state layout, and project-specific lifecycle scripts.
+Workbench SHALL own reusable project mechanics that can serve multiple repository archetypes: shell bootstrap, language/tool profiles, formatting/check hooks, workflow registries, generated project artifacts, creator-neutral worktree setup primitives, and adapter delivery. A consuming repository SHALL retain its package construction, application services, processes, domain commands, deployment actions, state layout, and project-specific lifecycle scripts.
 
 #### Scenario: finance keeps its stateful domain environment
 - **WHEN** finance composes the Workbench polyglot and workflow modules
@@ -23,7 +23,7 @@ Workbench SHALL publish importable project profiles for at least base, Nix, Pyth
 - **THEN** the resulting shell uses the consumer-selected package while retaining the profile's common uv/tool/hook behavior
 
 ### Requirement: Repository traits drive generic lifecycle behavior
-Workbench SHALL expose typed repository traits for project identity, submodules, stateful Devenv services, cache-sharing eligibility, secret-bearing worktree files, selected profiles, and ordered lifecycle hook references. Generated bootstrap and Workmux behavior SHALL derive from those traits. Arbitrary project lifecycle commands SHALL be supplied by the repository through explicit extension points and SHALL NOT be copied into Workbench core.
+Workbench SHALL expose typed repository traits for project identity, submodules, stateful Devenv services, cache-sharing eligibility, secret-bearing worktree files, selected profiles, and ordered lifecycle hook references. Generated bootstrap and worktree setup behavior SHALL derive from those traits. Arbitrary project lifecycle commands SHALL be supplied by the repository through explicit extension points and SHALL NOT be copied into Workbench core.
 
 #### Scenario: submodule repository receives initialization
 - **WHEN** a repository declares that it contains submodules
@@ -42,7 +42,7 @@ Workbench SHALL carry self-contained evaluation fixtures for a core-only project
 
 #### Scenario: stateful fixture rejects unsafe cache sharing
 - **WHEN** the polyglot fixture declares stateful services
-- **THEN** its generated Workmux configuration does not share `.devenv` or `.direnv` state across worktrees
+- **THEN** its worktree setup does not share `.devenv` or `.direnv` state across worktrees
 
 ### Requirement: One authority owns each generated artifact
 Workbench SHALL extend the existing registry and managed-file authorities rather than creating parallel renderers or file writers. A migration from repository-local mechanics SHALL remove the old declaration in the same change that enables the Workbench authority, and conflicts with unrelated regular files SHALL fail rather than overwrite them.

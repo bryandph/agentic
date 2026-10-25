@@ -5,7 +5,7 @@ Workbench SHALL ship a flake template that scaffolds a new repository with a `fl
 
 #### Scenario: template to working shell
 - **WHEN** `nix flake init` is run with the Workbench template and the dev shell is entered
-- **THEN** declared MCP configuration, agent directories, committed instructions, and Workmux configuration exist and the template's evaluation check passes
+- **THEN** declared MCP configuration, agent directories, and committed instructions exist and the template's evaluation check passes
 
 ### Requirement: Archetype variants for packaging projects
 Workbench SHALL offer archetype variants for software-packaging projects—at minimum Rust, Python/uv, polyglot, and embedded—by composing org-neutral profile modules with the workflow module. An archetype MUST NOT own the project's package construction: uv2nix, Rust overlays, OCI images, application services, and CI remain repository-owned and compose alongside it.

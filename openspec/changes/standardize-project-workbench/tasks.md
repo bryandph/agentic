@@ -5,7 +5,7 @@ in section 8 and BPH-24. Earlier rename/publication tasks remain separate.
 
 - [x] 1.1 Inventory the public Agentic option declarations, conventional/dendritic flake outputs, generated artifact owners, template names, remote URLs, and known consumers; record pointers and migration status in BPH-7.
 - [x] 1.2 Resolve the Workbench repository/namespace name and compatibility-release window in BPH-7 before changing any remote or deleting any alias.
-- [x] 1.3 Add core-only baseline checks that capture current MCP/agent/knowledge/Workmux artifact behavior so the rename cannot create a second writer or registry.
+- [x] 1.3 Add core-only baseline checks that capture current MCP/agent/knowledge artifact behavior so the rename cannot create a second writer or registry.
 - [x] 1.4 Run the public core formatter and `nix flake check --impure`, including its current minimal/template outputs, before beginning the additive API work.
 
 ## 2. Public Workbench core
@@ -14,7 +14,7 @@ in section 8 and BPH-24. Earlier rename/publication tasks remain separate.
 - [ ] 2.2 Split the public module layout into clear profile, workflow-registry, adapter, template, and check concerns without changing generated artifact ownership.
 - [ ] 2.3 Implement additive base, Nix, Python/uv, Rust, polyglot, embedded Rust, and infrastructure-oriented profiles; remove force-priority disabling of unrelated Devenv facilities.
 - [ ] 2.4 Implement typed repository traits and lifecycle extension points for project identity, submodules, stateful services, worktree cache/file handling, selected profiles, and ordered project hooks.
-- [ ] 2.5 Move MCP, agents, skills, instructions, knowledge, Serena, Workmux, secret interfaces, and user adapters to canonical Workbench namespaces while retaining one registry/renderer per artifact.
+- [ ] 2.5 Move MCP, agents, skills, instructions, knowledge, Serena, secret interfaces, and user adapters to canonical Workbench namespaces while retaining one registry/renderer per artifact.
 - [ ] 2.6 Update Workbench templates and workflow-only adoption paths to compose profiles without owning repository packaging, services, processes, or CI.
 - [ ] 2.7 Add minimal, Python/uv, stateful polyglot, submodule infrastructure, and private-env fixtures; assert additive composition, alias equivalence, single writers, and core org-neutrality.
 - [ ] 2.8 Run the core formatter, `nix flake check --impure`, and targeted builds of every archetype/template output; commit, push, and tag the reachable compatibility release before downstream canonicalization.
@@ -23,14 +23,14 @@ in section 8 and BPH-24. Earlier rename/publication tasks remain separate.
 
 - [ ] 3.1 Implement a narrow private Workbench environment module/flake that configures forge, runtime secret backend, model, default, agent/skill, and knowledge options without importing host/fleet outputs.
 - [ ] 3.2 Migrate the environment layer's composition to canonical Workbench names while preserving deprecated aliases and the existing core/env/repo layering contract.
-- [ ] 3.3 Compare all generated Claude, OpenCode, Codex, Serena, Workmux, AGENTS, and Home Manager artifacts before/after; remove old declarations only when the canonical authority is enabled.
+- [ ] 3.3 Compare all generated Claude, OpenCode, Codex, Serena, AGENTS, and Home Manager artifacts before/after; remove old declarations only when the canonical authority is enabled.
 - [ ] 3.4 Git-add new files, run `nix run --impure .#fmt`, build the Workbench rendered/configuration outputs, run `nix run --impure .#check`, and run `nix flake check --impure` before pushing the environment capsule/pin.
 
 ## 4. Standalone archetype migrations
 
 - [ ] 4.1 Implement the tracked migration issue in real-estate-search: import the Python/uv and workflow modules, retain Python 3.13/uv2nix/app/package overrides locally, delete duplicated mechanics, and compare its shell/check/package outputs.
 - [ ] 4.2 Run real-estate-search formatting plus `nix flake check --impure` and targeted default-package/app builds, then commit and push that repository independently.
-- [ ] 4.3 Implement the tracked migration issue in finance: import polyglot/workflow modules, retain PostgreSQL/Playwright/process/script/database-hook behavior locally, and delete hand-written Vault/MCP/Serena/OpenCode/Workmux mechanics.
+- [ ] 4.3 Implement the tracked migration issue in finance: import polyglot/workflow modules, retain PostgreSQL/Playwright/process/script/database-hook behavior locally, and delete hand-written Vault/MCP/Serena/OpenCode mechanics.
 - [ ] 4.4 Run finance formatting plus `nix flake check --impure` and targeted shell/package/image checks that do not start `devenv up`, then commit and push that repository independently.
 
 ## 5. Infrastructure subproject migrations
