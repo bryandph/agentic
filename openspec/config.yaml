@@ -1,0 +1,35 @@
+schema: spec-driven
+# Keep context as retrieval routes; authoritative instructions are not copied here.
+context: |
+  Follow applicable repository instructions already supplied in the session.
+  They define artifact ownership, lifecycle approvals, generated-file
+  ownership, secrets constraints, and command discipline.
+
+  Retrieve only task-relevant sources:
+  - Architecture, the layering contract, and the consuming surface: README.md.
+  - Topic guides (Pi delivery, native transport, scoped secrets, harness
+    coverage): docs/.
+  - Configuration sources: modules/ (dendritic; `_`-prefixed paths are
+    internals imported by their siblings); public exports in
+    modules/exports.nix; checks under modules/checks/.
+  - Work identity, phase, approvals, and status: the linked authoritative work
+    item; retain existing records unless migration is separately requested.
+  - Durable preferences and rationale: task-relevant Serena memories, discovered
+    by names/topics before affected actions; never bulk-load namespaces.
+
+  Core is org-neutral (README, "Layering contract"): specs and changes here
+  must not name environment hosts, endpoints, or secret locations.
+  Do not persist inventories, backlog summaries, or status snapshots here.
+rules:
+  proposal:
+    - 'Open with a link to the authoritative work item. If none exists, say so, search for matching work, and ask before creating one; independent authorized work may continue.'
+    - 'State a "Non-goals" / out-of-scope section explicitly.'
+    - 'Pointers not values — reference the file/module that holds a fact rather than pasting drift-prone current state.'
+  design:
+    - 'Record decisions with alternatives and rationale. Preserve useful durable rationale in Serena after shipping without duplicating the specification.'
+    - 'Place each artifact by the layering contract (core, env, or repo) and state which consumer-facing exports change; consumer breakage needs an explicit migration path.'
+    - 'Before leaving exploration/planning/decision-making, obtain approval of the concrete plan and unresolved decisions. Honor existing same-scope approval; artifact completeness is not approval.'
+  tasks:
+    - 'Include format and verification gates, naming targeted checks/outputs: `nix fmt` (treefmt check), targeted `nix build .#checks.<system>.<name>`, and `nix flake check` before review. Do not use --all-systems for local verification.'
+    - 'Keep tasks shippable in small increments; retrieve style/dendritic-additive-then-flip-promotion when relevant.'
+    - 'At milestones, blockers, and handoff update the authoritative item with artifact/code/evidence links. Finish implementation ready for review; merge/deploy requires authorization for that action and scope. Archive after authorized shipping.'
