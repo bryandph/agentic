@@ -4,22 +4,22 @@ Implementation starts only after the operator approves this change as a whole. T
 
 - [x] 1.1 Operator decisions on the review questions (2026-10-24): binary content deferred to BPH-74 with nothing reserved (D9); nested declared paths refused (D2); overrides as an argument list plus `--` exec only (D6); the audit ships in this change (D5); Herdr core surface is `enable`/`package`/`extraConfig` plus reconciliation (D7); `defaultPath` input is `{ key, name, remote, groups }` with areas as groups (D2)
 - [x] 1.2 Operator approval of the change as a whole, recorded on BPH-73 (2026-10-24)
-- [ ] 1.3 Record the current `workspace-devenv` manifest output as the compatibility baseline for 2.4
-- [ ] 1.4 Baseline gates pass before any edit: `nix fmt` leaves no diff; `nix build .#checks.<system>.workspace-devenv .#checks.<system>.workspace-home .#checks.<system>.org-neutral --no-link`
+- [x] 1.3 Record the current `workspace-devenv` manifest output as the compatibility baseline for 2.4
+- [x] 1.4 Baseline gates pass before any edit: `nix fmt` leaves no diff; `nix build .#checks.<system>.workspace-devenv .#checks.<system>.workspace-home .#checks.<system>.org-neutral --no-link`
 
 ## 2. Declaration schema and resolved form
 
-- [ ] 2.1 Add `remotes`, the new `repos` fields (`remote`, `name`, `url`, `aliases`, `path`, `groups`) and `defaultPath` in `modules/workspace.nix`, with the one-of `remote`/`url` and path assertions
-- [ ] 2.2 Add the resolved form and the shell's manifest file; switch the mani renderer to read only the resolved form
-- [ ] 2.3 Add the `workbench.workspace` alias to the devenv workspace module; read `tags` as `groups` with a deprecation warning
-- [ ] 2.4 Fixtures in `modules/checks/workspace.nix`: a non-Gitea remote (scp-style, nested group) entry; a flat list by URL with no remotes, paths or groups; an area-as-group `defaultPath` fixture; refusal cases (both/neither of `remote`/`url`, colliding paths, a path nested inside another declared path); the milestone declaration rendering identical project entries to the 1.3 baseline; mixed `workbench`/`agentic` declarations
-- [ ] 2.5 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-devenv .#checks.<system>.org-neutral --no-link`
+- [x] 2.1 Add `remotes`, the new `repos` fields (`remote`, `name`, `url`, `aliases`, `path`, `groups`) and `defaultPath` in `modules/workspace.nix`, with the one-of `remote`/`url` and path assertions
+- [x] 2.2 Add the resolved form and the shell's manifest file; switch the mani renderer to read only the resolved form
+- [x] 2.3 Add the `workbench.workspace` alias to the devenv workspace module; read `tags` as `groups` with a deprecation warning
+- [x] 2.4 Fixtures in `modules/checks/workspace.nix`: a non-Gitea remote (scp-style, nested group) entry; a flat list by URL with no remotes, paths or groups; an area-as-group `defaultPath` fixture; refusal cases (both/neither of `remote`/`url`, colliding paths, a path nested inside another declared path); the milestone declaration rendering identical project entries to the 1.3 baseline; mixed `workbench`/`agentic` declarations
+- [x] 2.5 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-devenv .#checks.<system>.org-neutral --no-link`
 
 ## 3. Renderer boundary
 
-- [ ] 3.1 Set `sync_remotes` and `remove_orphaned_worktrees` explicitly false; add assertions refusing `extraConfig` or project overrides that enable them or add `worktrees`/`remotes`; add `renderers.mani.enable`
-- [ ] 3.2 Sync-safety check: in a sandbox with local bare repositories as remotes, run `mani sync` over a manifest where one checkout exists (local commit, uncommitted edit, extra worktree) and one is missing; assert the missing one is cloned and the existing one's HEAD, index, working tree, remotes and worktree list are unchanged
-- [ ] 3.3 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-devenv .#checks.<system>.workspace-sync --no-link`
+- [x] 3.1 Set `sync_remotes` and `remove_orphaned_worktrees` explicitly false; add assertions refusing `extraConfig` or project overrides that enable them or add `worktrees`/`remotes`; add `renderers.mani.enable`
+- [x] 3.2 Sync-safety check: in a sandbox with local bare repositories as remotes, run `mani sync` over a manifest where one checkout exists (local commit, uncommitted edit, extra worktree) and one is missing; assert the missing one is cloned and the existing one's HEAD, index, working tree, remotes and worktree list are unchanged
+- [x] 3.3 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-devenv .#checks.<system>.workspace-sync --no-link`
 
 ## 4. Audit
 
@@ -36,7 +36,7 @@ Implementation starts only after the operator approves this change as a whole. T
 
 ## 6. Home Manager half and Herdr
 
-- [ ] 6.1 Add the `workbench.workspace` alias to the Home Manager workspace module with no behaviour change
+- [x] 6.1 Add the `workbench.workspace` alias to the Home Manager workspace module with no behaviour change
 - [x] 6.2 Add the org-neutral `programs.herdr` module (`enable`, `package`, `extraConfig`, live-file reconciliation), export it as `homeModules.herdr` and include it in `homeModules.workbench`/`agentic`
 - [x] 6.3 Extend `workspace-home`: core-only consumer with Herdr enabled gets `<root>/.worktrees`; Herdr disabled writes no file or activation step; `homeModules.workspace` alone behaves as today; reconciliation keeps a runtime-written key (as `checks.herdr-home`, which also covers a flake-parts consumer carrying its own herdr module)
 - [x] 6.4 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-home .#checks.<system>.public-surface .#checks.<system>.org-neutral --no-link`
