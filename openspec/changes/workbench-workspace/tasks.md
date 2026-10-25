@@ -43,22 +43,22 @@ Implementation starts only after the operator approves this change as a whole. T
 
 ## 7. Template and README
 
-- [ ] 7.1 Add `templates/workspace/` (allowlist `.gitignore`, `.envrc`, `flake.nix` with empty declaration) and register it in `modules/templates.nix`
-- [ ] 7.2 Template check: instantiate, evaluate the shell with core substituted, assert no manifest and only scaffolding untracked; create a nested repository directory and assert the allowlist hides it
-- [ ] 7.3 README: workspace section covering the declaration, renderer boundary, audit, overrides, worktree root and instance pattern, with `*.example` hosts only
-- [ ] 7.4 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-template .#checks.<system>.org-neutral --no-link`
+- [x] 7.1 Add `templates/workspace/` (allowlist `.gitignore`, `.envrc`, `flake.nix` with empty declaration) and register it in `modules/templates.nix`
+- [x] 7.2 Template check: instantiate, evaluate the shell with core substituted, assert no manifest and only scaffolding untracked; create a nested repository directory and assert the allowlist hides it
+- [x] 7.3 README: workspace section covering the declaration, renderer boundary, audit, overrides, worktree root and instance pattern, with `*.example` hosts only
+- [x] 7.4 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-template .#checks.<system>.org-neutral --no-link`
 
 ## 8. Review gate
 
-- [ ] 8.1 `nix flake check` passes on the workstation's system
-- [ ] 8.2 `nix develop -c openspec validate workbench-workspace --strict` passes
+- [x] 8.1 `nix flake check` passes on the workstation's system
+- [x] 8.2 `nix develop -c openspec validate workbench-workspace --strict` passes
 - [ ] 8.3 Update BPH-73 with the commit links and check evidence; hand off for review. Merge needs the operator's authorisation
 
 ## 9. BPH-73 done-when (consumer work, outside this repository)
 
 These are verified in the consuming repositories under their own work, after the core change is published; they are listed here because BPH-73 closes on them.
 
-- [ ] 9.1 Fixtures pass for a non-Gitea remote and for a flat list with no org/area structure (tasks 2.4 and 3.2 in core)
+- [x] 9.1 Fixtures pass for a non-Gitea remote and for a flat list with no org/area structure (tasks 2.4 and 3.2 in core)
 - [ ] 9.2 The workspace instance repository uses the new schema with Area-derived paths through `defaultPath`; the audit shows no path change against the previous manifest
 - [ ] 9.3 An uncommitted core edit reaches an evaluation of the operator's infrastructure repository through `workspace-overrides` with no pin bump, and that repository's `flake.lock` is unchanged afterwards
 - [ ] 9.4 On both workstations (macOS and WSL), `mani sync` leaves existing checkouts untouched and `mani run` is useful (D1 validation); if not, open the vcs2l fallback as a follow-up

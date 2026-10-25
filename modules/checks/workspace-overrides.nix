@@ -12,8 +12,9 @@
 # The end-to-end check is written for a strict Linux sandbox: own HOME and
 # XDG directories, a local store, no substituters, no registries, and a
 # consumer whose only inputs are the local bare repositories, so nothing
-# needs nixpkgs or the network. It has only been run locally on a
-# sandbox = false macOS host; Linux CI is where sandboxed runs get proven.
+# needs nixpkgs or the network. Core has no CI: besides unsandboxed macOS
+# runs, it passed once as checks.x86_64-linux on a sandbox = true Linux
+# remote builder (2026-10-24, BPH-73). Rerun it there after changes.
 #
 # devenv is stubbed as in modules/checks/workspace.nix (copied, not shared).
 {config, ...}: {
