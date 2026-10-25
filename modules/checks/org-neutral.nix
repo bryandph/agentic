@@ -10,6 +10,10 @@
 #     assert rendered outputs contain only fixture values and CLI
 #     invocations (no plaintext); this check re-greps their rendered
 #     project config for org identifiers as a belt-and-braces sweep.
+#   * openspec — specs and changes are published with core, so openspec/
+#     gets the same deny-list plus tracker links and forge issue
+#     references. Its patterns use bracket classes so the scan of this
+#     file's own history stays clean.
 #
 # The org-identifier list is a deny-list of known BPH markers, not an
 # allow-list — extend it when a new environment-specific vocabulary
@@ -43,6 +47,7 @@
         src = ../../modules;
         fragments = ../../fragments;
         skills = ../../skills;
+        openspec = ../../openspec;
       } ''
         set -euo pipefail
 
@@ -56,6 +61,12 @@
         # Rendered artifact sweep under the env backend.
         if grep -niE '\.bph\b|blackdc' ${fixture.packages.${system}.fixture-claude-config}; then
           echo "org-specific identifier leaked into a rendered artifact"
+          exit 1
+        fi
+
+        # Spec scan: the same deny-list plus tracker and forge-issue references.
+        if grep -rniE '[.]bph\b|git[.]bph|blackdc|mandala-bph|bryan[d]ph|you[t]rack|nixspace[#][0-9]' "$openspec"; then
+          echo "org-specific identifier found in openspec/ (see matches above)"
           exit 1
         fi
 
