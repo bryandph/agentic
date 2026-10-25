@@ -33,8 +33,10 @@
           type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
           default = {};
         };
+        # lazyAttrsOf, as devenv declares it: a key under a false mkIf stays
+        # present and throws when read, which attrsOf would hide.
         env = lib.mkOption {
-          type = lib.types.attrsOf lib.types.anything;
+          type = lib.types.lazyAttrsOf lib.types.anything;
           default = {};
         };
         assertions = lib.mkOption {
@@ -80,6 +82,12 @@
       };
     };
     empty = evalDevenv {};
+    # Repositories but no overrides: the common consumer shape. devenv
+    # reads every `env` value when it builds the shell, so force them all.
+    noOverrides = evalDevenv {
+      workbench.workspace.repos.a.url = "https://forge.fixture.example/a.git";
+    };
+    envReadable = cfg: lib.all (v: builtins.seq v true) (lib.attrValues cfg.env);
     unknownKey = evalDevenv {
       workbench.workspace = {
         repos.a.url = "https://forge.fixture.example/a.git";
@@ -92,8 +100,12 @@
       != null
       && failedMessages fixture == []
       && fixture.env ? WORKBENCH_WORKSPACE_OVERRIDES
+      && envReadable fixture
       && commandOf empty == null
-      && !(empty.env ? WORKBENCH_WORKSPACE_OVERRIDES)
+      && empty.env == {}
+      && commandOf noOverrides != null
+      && envReadable noOverrides
+      && builtins.attrNames noOverrides.env == ["WORKBENCH_WORKSPACE_MANIFEST"]
       && lib.any (lib.hasInfix "workspace.overrides.x") (failedMessages unknownKey);
   in {
     checks.workspace-overrides-unit = pkgs.runCommand "agentic-workspace-overrides-unit" {nativeBuildInputs = [pkgs.python3 pkgs.git];} ''
