@@ -29,10 +29,10 @@ Implementation starts only after the operator approves this change as a whole. T
 
 ## 5. Local flake-input overrides
 
-- [ ] 5.1 Add the `workspace-overrides` command: lock reading, URL normalisation, alias matching, nested input paths, `follows` skipping, `--map`, `--checkout`, `--only`, `--scheme`, `--` exec, untracked-file warning, `--no-write-lock-file`
-- [ ] 5.2 Unit fixtures for URL normalisation across scp-style, `ssh://`, `git+ssh://`, HTTPS and `github:` forms, including a mirror alias and a non-match between two repositories of the same name on different remotes
-- [ ] 5.3 Check `workspace-overrides`: a fixture consumer flake locks an input to a declared URL; the peer checkout carries an uncommitted edit to a tracked file; evaluation with the emitted arguments sees the edit and leaves `flake.lock` byte-identical; also the relative `path:` input mapped explicitly and the missing-checkout case
-- [ ] 5.4 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-overrides --no-link`
+- [x] 5.1 Add the `workspace-overrides` command: lock reading, URL normalisation, alias matching, nested input paths, `follows` skipping, `--map`, `--checkout`, `--only`, `--scheme`, `--` exec, untracked-file warning, `--no-write-lock-file`
+- [x] 5.2 Unit fixtures for URL normalisation across scp-style, `ssh://`, `git+ssh://`, HTTPS and `github:` forms, including a mirror alias and a non-match between two repositories of the same name on different remotes
+- [x] 5.3 Check `workspace-overrides`: a fixture consumer flake locks an input to a declared URL; the peer checkout carries an uncommitted edit to a tracked file; evaluation with the emitted arguments sees the edit and leaves `flake.lock` byte-identical; also the relative `path:` input mapped explicitly and the missing-checkout case
+- [x] 5.4 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-overrides --no-link`
 
 ## 6. Home Manager half and Herdr
 
