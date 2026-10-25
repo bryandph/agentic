@@ -23,9 +23,9 @@ Implementation starts only after the operator approves this change as a whole. T
 
 ## 4. Audit
 
-- [ ] 4.1 Add the `workspace-audit` command with `audit.ignore` and `--strict`
-- [ ] 4.2 Check `workspace-audit` over a fixture tree with one missing checkout, one origin mismatch and one undeclared directory; assert the three findings and an unchanged tree (hash before and after)
-- [ ] 4.3 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-audit --no-link`
+- [x] 4.1 Add the `workspace-audit` command with `audit.ignore` and `--strict`
+- [x] 4.2 Check `workspace-audit` over a fixture tree with one missing checkout, one origin mismatch and one undeclared directory; assert the three findings and an unchanged tree (hash before and after)
+- [x] 4.3 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-audit --no-link`
 
 ## 5. Local flake-input overrides
 
