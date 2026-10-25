@@ -60,6 +60,8 @@
     assert config.flake.modules.devenv ? workbench;
     assert config.flake.modules.homeManager ? agentic;
     assert config.flake.modules.homeManager ? workbench;
+    assert config.flake.modules.homeManager ? herdr;
+    assert lib.all (name: config.flake.homeModules ? ${name}) ["agentic" "workbench" "default" "workspace" "herdr"];
       pkgs.runCommand "agentic-public-surface" {} ''
         touch $out
       '';

@@ -55,6 +55,9 @@
       default = config.flake.modules.homeManager.agentic;
       # Already part of `agentic`; standalone for workspace-only consumers.
       inherit (config.flake.modules.homeManager) workspace;
+      # Already part of `agentic`; standalone `programs.herdr` (inert
+      # until enabled, package consumer-supplied).
+      inherit (config.flake.modules.homeManager) herdr;
     };
   };
 }
