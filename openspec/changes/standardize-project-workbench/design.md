@@ -1,6 +1,6 @@
 ## Context
 
-Agentic began as the org-neutral agent workflow plane, but its current public surface already spans Devenv bootstrap, language profiles, generated project files, Workmux, MCP, agents, knowledge, templates, and Home Manager adapters. The surrounding project mechanics are still repeated in the Terraform, Kubernetes, and Ansible standalone devenv modules of the environment repository, finance's `flake-parts/devenv.nix`, and real-estate-search's `flake.nix`.
+Agentic began as the org-neutral agent workflow plane, but its current public surface already spans Devenv bootstrap, language profiles, generated project files, MCP, agents, knowledge, templates, and Home Manager adapters. The surrounding project mechanics are still repeated in the Terraform, Kubernetes, and Ansible standalone devenv modules of the environment repository, finance's `flake-parts/devenv.nix`, and real-estate-search's `flake.nix`.
 
 These consumers expose two different pressures. Infrastructure repositories repeat bootstrap and delivery code but own important domain commands. Finance needs a polyglot shell and stateful per-worktree database lifecycle. Real-estate-search needs a small Python/uv shell while retaining its own uv2nix build and package overrides. The shared abstraction therefore has to be composable project mechanics, not a catalog of entire project shells.
 
@@ -28,7 +28,7 @@ Affected repositories are:
 
 - Centralizing complete application or infrastructure-domain shells.
 - Replacing repository package outputs, build systems, CI, or runtime services.
-- Reimplementing upstream Devenv, mcp-servers-nix, treefmt, hooks, Serena, or Workmux.
+- Reimplementing upstream Devenv, mcp-servers-nix, treefmt, hooks or Serena.
 - Combining the environment repository's fleet/operator reorganization into this change.
 
 ## Public surface baseline (2026-09-19)
@@ -40,11 +40,11 @@ These declaration pointers are the inventory for task 1.1; migration status is
 
 | Surface | Current declaration and consumers |
 | --- | --- |
-| Flake-parts options | `modules/registry/_*.nix`, `modules/instructions.nix`, and `modules/adapters/project.nix` declare `agentic.{agents,agentsLib,knowledge,knowledgeLib,fragmentSizeBound,mcp,secrets,forges,serena,memoryPlane,knowledgeSearch,workmux,workmuxLib,devenvLib,ciCache,instructions}`. The nested options remain under those declaration files. The private environment layer configures them. |
+| Flake-parts options | `modules/registry/_*.nix`, `modules/instructions.nix`, and `modules/adapters/project.nix` declare `agentic.{agents,agentsLib,knowledge,knowledgeLib,fragmentSizeBound,mcp,secrets,forges,serena,memoryPlane,knowledgeSearch,devenvLib,ciCache,instructions}`. The nested options remain under those declaration files. The private environment layer configures them. |
 | Home Manager options | `modules/adapters/user.nix` declares `agentic.mcp.{userServers,sharedUserConfig.enable}`. The environment repository and its user-tier configuration consume the user-tier delivery. |
 | Conventional and dendritic modules | `modules/exports.nix` publishes `flakeModules.{default,agentic}`, `devenvModules.{default,agentic,rust,python,polyglot,embedded-rust}`, and `homeModules.{default,agentic}`. Their sources are `flake.modules.{flake,homeManager,devenv}.agentic` plus the four profile names (`modules/profiles.nix`). The environment repository and its Kubernetes, Terraform, and Ansible flakes import `flakeModules.default`; templates also import it. |
 | Other flake outputs | `modules/templates.nix` publishes `templates.{default,rust,python,polyglot,embedded,adopt,agentic}`. `modules/ci-cache.nix`, `modules/packages/pi-mcp-adapter.nix`, `modules/adapters/{pi,agents}.nix`, and `modules/instructions.nix` publish `ci-cache`, `pi-mcp-adapter`, `pi-agent-roles`, and write apps. Consumers include the environment's CI and user-tier configuration and template adopters. |
-| Generated project files | `modules/registry/_bootstrap.nix` and `modules/adapters/project.nix` use mcp-servers-nix as the MCP file writer for Claude, Codex, OpenCode, and optional VS Code flavors. The bootstrap places agent roles, Serena configuration/read-only knowledge, and `.workmux.yaml`; `modules/instructions.nix` renders committed `AGENTS.md` and `CLAUDE.md`. The private environment layer exposes comparison packages for these outputs. |
+| Generated project files | `modules/registry/_bootstrap.nix` and `modules/adapters/project.nix` use mcp-servers-nix as the MCP file writer for Claude, Codex, OpenCode, and optional VS Code flavors. The bootstrap places agent roles and Serena configuration/read-only knowledge; `modules/instructions.nix` renders committed `AGENTS.md` and `CLAUDE.md`. The private environment layer exposes comparison packages for these outputs. |
 | Repository identities | The environment repository mounts this core as a submodule of the private forge primary; the public mirror is on GitHub (`README.md` and all six templates). The user-tier configuration and the parent-owned Kubernetes/Terraform/Ansible flakes refer to the private forge URL; the environment repository imports its submodule checkout. The finance and real-estate migrations are tracked in BPH-17 and BPH-18; pico-embassy is BPH-19. |
 
 Baseline comparison must include both module publication channels, exact
@@ -78,7 +78,7 @@ and BPH-7 rather than treating this slice as completion of the wider rename.
 
 ### D1: One Workbench core, not separate devshell and agent repositories
 
-We chose one public Workbench core over splitting generic development tooling from Agentic because project identity, generated files, knowledge, MCP, Workmux, hooks, and shell lifecycle share the same traits and evaluation. A split would make every consumer reconcile two pins, two option graphs, and overlapping file ownership before a second independent use case proves that boundary.
+We chose one public Workbench core over splitting generic development tooling from Agentic because project identity, generated files, knowledge, MCP, hooks, and shell lifecycle share the same traits and evaluation. A split would make every consumer reconcile two pins, two option graphs, and overlapping file ownership before a second independent use case proves that boundary.
 
 The internal module tree SHALL still separate profiles, workflow registries, adapters, templates, and checks. Repository count is not the modularity boundary.
 
@@ -104,13 +104,13 @@ The initial profile families are base, Nix, Python/uv, Rust, polyglot, embedded 
 
 We chose a small typed trait schema over inspecting repository contents or embedding per-repo modules in core. Traits include project identity, submodule presence, stateful-service presence, secret-bearing worktree copies, cache-sharing eligibility, selected profiles, and lifecycle hook references.
 
-Traits drive generated Workmux/bootstrap/check behavior. Custom lifecycle commands remain repository declarations because finance's database provisioning and infrastructure commands are meaningful domain behavior. Core provides the hook slots and ordering, not the scripts.
+Traits drive generated bootstrap, worktree setup, and check behavior. Custom lifecycle commands remain repository declarations because finance's database provisioning and infrastructure commands are meaningful domain behavior. Core provides the hook slots and ordering, not the scripts.
 
 ### D5: Workbench owns shared adapters and pins; builds remain consumer-owned
 
 We chose to let Workbench carry the inputs needed by its own adapters/profiles while consumers retain packaging-specific inputs such as uv2nix, pyproject overlays, Rust overlays, OCI tooling, and provider SDKs. Consumers use `follows` where compatible, but Workbench does not require one package-construction strategy.
 
-This keeps real-estate-search's virtual environment and overrides local, and finance's PostgreSQL bundle/images local, while deleting their hand-written MCP, Serena, secret-wrapper, and generic Workmux code.
+This keeps real-estate-search's virtual environment and overrides local, and finance's PostgreSQL bundle/images local, while deleting their hand-written MCP, Serena, secret-wrapper, and generic worktree setup code.
 
 ### D6: Canonical Workbench API with staged Agentic compatibility
 

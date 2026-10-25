@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Shell bootstrap of workflow artifacts
-The Workbench Devenv module SHALL place the project workflow artifacts: MCP configuration, agent directories, generated Serena project/memory configuration, generated Workmux configuration, and other registry-owned project files, all idempotently and through their existing single-writer lifecycle. `AGENTS.md` and `CLAUDE.md` remain committed artifacts governed by the agents capability rather than shell-entry placements. Enabling workflow bootstrap MUST NOT implicitly enable language profiles, stateful services, or project processes.
+The Workbench Devenv module SHALL place the project workflow artifacts: MCP configuration, agent directories, generated Serena project/memory configuration, and other registry-owned project files, all idempotently and through their existing single-writer lifecycle. `AGENTS.md` and `CLAUDE.md` remain committed artifacts governed by the agents capability rather than shell-entry placements. Enabling workflow bootstrap MUST NOT implicitly enable language profiles, stateful services, or project processes.
 
 #### Scenario: fresh clone becomes workflow-complete
 - **WHEN** a consumer repository is cloned and its Workbench-enabled dev shell is entered once
@@ -18,7 +18,7 @@ Each Workbench project profile SHALL be importable independently of workflow art
 
 #### Scenario: Python profile without agent delivery
 - **WHEN** a public Python repository imports the Python/uv profile without the workflow module
-- **THEN** it receives the declared Python/uv tools and hooks without MCP, agent, knowledge, or Workmux artifacts
+- **THEN** it receives the declared Python/uv tools and hooks without MCP, agent, or knowledge artifacts
 
 #### Scenario: polyglot profile preserves consumer processes
 - **WHEN** finance composes the polyglot profile with its frontend/backend processes and PostgreSQL service
