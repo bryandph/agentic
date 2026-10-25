@@ -152,12 +152,18 @@
         test "$status" = 1
         cd $TMPDIR
         workspace-audit --root $ws --json > $TMPDIR/rooted.json
+        # Inside the workspace shell the root defaults to $DEVENV_ROOT,
+        # wherever the command runs; --root still wins.
+        DEVENV_ROOT=$ws workspace-audit --json > $TMPDIR/shell.json
+        DEVENV_ROOT=$TMPDIR workspace-audit --root $ws --json > $TMPDIR/shell-rooted.json
 
         after=$(treehash $ws)
         test "$before" = "$after"
 
         jq -e --argjson want ${lib.escapeShellArg (builtins.toJSON expected)} '.findings == $want' $TMPDIR/found.json
         jq -e --argjson want ${lib.escapeShellArg (builtins.toJSON expected)} '.findings == $want' $TMPDIR/rooted.json
+        jq -e --argjson want ${lib.escapeShellArg (builtins.toJSON expected)} --arg root $ws '.findings == $want and .root == $root' $TMPDIR/shell.json
+        jq -e --argjson want ${lib.escapeShellArg (builtins.toJSON expected)} '.findings == $want' $TMPDIR/shell-rooted.json
         test "$(grep -c '^missing \|^origin \|^undeclared ' $TMPDIR/human)" = 3
         grep -q '^3 finding(s)' $TMPDIR/human
 
