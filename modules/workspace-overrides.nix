@@ -33,16 +33,24 @@ let
       '';
     };
 
-    config = lib.mkIf (cfg.repos != {}) {
-      assertions =
-        lib.mapAttrsToList (input: key: {
-          assertion = false;
-          message = "workspace.overrides.${input}: `${key}` is not a declared repository.";
-        })
-        unknown;
-      packages = [(import ./_workspace-overrides/package.nix {inherit pkgs;})];
-      env.WORKBENCH_WORKSPACE_OVERRIDES = lib.mkIf (cfg.overrides != {}) (pkgs.writeText "workbench-workspace-overrides.json" (builtins.toJSON cfg.overrides));
-    };
+    config = lib.mkMerge [
+      (lib.mkIf (cfg.repos != {}) {
+        assertions =
+          lib.mapAttrsToList (input: key: {
+            assertion = false;
+            message = "workspace.overrides.${input}: `${key}` is not a declared repository.";
+          })
+          unknown;
+        packages = [(import ./_workspace-overrides/package.nix {inherit pkgs;})];
+      })
+      # devenv's `env` is a lazyAttrsOf: a key under a false mkIf stays
+      # present and throws when the shell reads it, hence optionalAttrs.
+      {
+        env = lib.optionalAttrs (cfg.repos != {} && cfg.overrides != {}) {
+          WORKBENCH_WORKSPACE_OVERRIDES = pkgs.writeText "workbench-workspace-overrides.json" (builtins.toJSON cfg.overrides);
+        };
+      }
+    ];
   };
   devenv = {
     key = "agentic/workspace-overrides/devenv";

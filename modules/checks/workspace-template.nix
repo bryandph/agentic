@@ -27,8 +27,10 @@
           type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
           default = {};
         };
+        # lazyAttrsOf, as devenv declares it: a key under a false mkIf stays
+        # present and throws when read, which attrsOf would hide.
         env = lib.mkOption {
-          type = lib.types.attrsOf lib.types.anything;
+          type = lib.types.lazyAttrsOf lib.types.anything;
           default = {};
         };
         assertions = lib.mkOption {
