@@ -31,6 +31,172 @@ Hard rules:
   core can see (e.g. memories core itself ships) — never a consuming repo's
   artifacts.
 
+## Workspace
+
+A workspace is one tree of independently versioned repositories under a
+single root, declared once in Nix instead of chained together with
+submodules. Core ships the declaration and the tools around it; the
+environment's own workspace repository supplies the remotes, the
+repositories and the folder layout.
+
+### Declaration
+
+`devenvModules.workspace` (also in `flake.modules.devenv.workspace` for
+flake-parts consumers) adds `workbench.workspace` (alias
+`agentic.workspace`) to a devenv shell:
+
+```nix
+workbench.workspace = {
+  remotes.team = {
+    url = "git@forge.example:team";              # scp-style, ssh:// or HTTPS, any forge
+    aliases = [ "https://mirror.example/team" ]; # mirrors serving the same repositories
+  };
+  repos = {
+    tool.remote = "team";                        # git@forge.example:team/tool.git
+    site = { remote = "team"; name = "website"; groups = [ "apps" ]; };
+    lib = { url = "https://code.example/upstream/lib.git"; path = "third-party/lib"; };
+  };
+};
+```
+
+A repository sets exactly one of `remote` or `url`. With `remote`, the
+clone URL is the remote's `url`, a `/`, the repository's `name` (default:
+its key) and the remote's `suffix` (default `.git`). `aliases`, on a
+remote or a repository, lists further URLs that identify the same
+repository. `path` defaults to `defaultPath { key, name, remote, groups }`,
+which returns `name`: a flat list under the root. `groups` are selection
+labels; they render as mani tags and select repositories for tasks and
+overrides. Paths must be relative and normalised, unique, and not inside
+another declared path; evaluation fails and names the entries otherwise.
+The first release's `tags` still works as a deprecated synonym of
+`groups`.
+
+A folder layout is configuration, and an area is a group. To keep the
+workspace's own repositories at the root and each area's repositories in
+a folder named after the area:
+
+```nix
+workbench.workspace.defaultPath = r: let
+  area = lib.findFirst (g: lib.elem g [ "infra" "apps" ]) null r.groups;
+in if area == null then r.name else "${area}/${r.name}";
+```
+
+With that, `site` above is checked out at `apps/website` and `tool` at
+`tool`.
+
+The declaration resolves to `workbench.workspace.resolved`, a list of
+`{ key, url, aliases, path, groups }` with remotes joined and paths
+computed. The shell exports it as JSON at `$WORKBENCH_WORKSPACE_MANIFEST`;
+the renderer, the audit and the override helper read only that, and so
+can your scripts.
+
+### Rendering
+
+With any repository declared, the shell puts `mani` on the path and
+writes `mani.yaml` (`renderers.mani.enable = false` turns that off).
+Rendering writes the manifest and nothing else: entering the shell never
+clones, fetches or moves anything. `mani sync` clones what is missing and
+leaves existing checkouts alone, and `status` and `fetch` are the default
+tasks for `mani run` (`tasks` replaces them), as in
+`mani run status --all` or `mani run fetch --tags apps`.
+
+The manifest sets `sync_gitignore`, `sync_remotes` and
+`remove_orphaned_worktrees` to false. `extraConfig` is merged over the
+generated manifest, but evaluation refuses it when it enables any of
+those three or adds per-project `worktrees` or `remotes`: worktrees belong
+to the worktree tool and remotes to git. Changing a path does not move a
+checkout; the next `mani sync` clones at the new path and the audit
+reports the old one as undeclared.
+
+### Audit
+
+`workspace-audit` compares the declaration with the tree and changes
+nothing. It reports declared paths that are missing, declared paths that
+are not the top of a git repository, checkouts whose `origin` matches
+neither the declared URL nor an alias, and top-level directories nobody
+declared. Dot-directories and parents of declared paths are never
+reported; list other names in `audit.ignore` or pass `--ignore`. The root
+is `$DEVENV_ROOT` inside the workspace shell and the current directory
+outside it; `--root` sets it. `--json` prints the findings as JSON, and
+`--strict` exits 1 when there are any, so the audit can serve as a check.
+Run it before and after changing the declaration to see what moved.
+
+### Local overrides
+
+`workspace-overrides` lets another flake evaluate against your local
+checkouts without bumping its pins. It reads that flake's `flake.lock`
+(the current directory, or `--flake DIR`), matches each input's locked and
+original URL against the declared URLs and aliases across spellings
+(scp-style, `ssh://`, `git+ssh://`, HTTPS, `github:`), and prints
+`--override-input <input> git+file://<checkout>` for each match, followed
+by `--no-write-lock-file`. That is the whole interface, an argument list
+or a command run with it:
+
+```sh
+eval "nix build $(workspace-overrides) .#thing"
+workspace-overrides -- nix build .#thing
+```
+
+Nothing applies overrides implicitly, so every override is visible on the
+command that uses it, and the lock file is never written. The `--` form
+runs only nix commands that do not write a lock. Checkouts are found
+relative to the workspace root, `$DEVENV_ROOT` inside the workspace shell
+(`--root` sets it).
+
+Inputs that no URL can match, such as a relative `path:` input backed by
+a submodule, are mapped with `--map <input>=<key>` or, in the
+declaration, `workbench.workspace.overrides.<input> = "<key>"`; nested
+inputs are addressed as `a/b`. `--checkout <key>=<dir>` points one
+repository at another checkout, such as a worktree, for one run, and
+`--only <key or group>` limits the set. `git+file` sees uncommitted edits
+to tracked files but not new files until they are added with `git add -N`;
+the command reminds you when a checkout has untracked files, and
+`--scheme path` uses `path:` instead.
+
+### Worktrees and Herdr
+
+The Home Manager half, `homeModules.workspace` (also part of
+`homeModules.workbench`), takes `workbench.workspace.root`, the absolute
+path of the workspace root. Setting it makes git record worktree links as
+relative paths, so checkouts survive moving the tree, and points Herdr's
+`worktrees.directory` at `worktreeDir`, by default `<root>/.worktrees`,
+where Herdr creates `<repo>/<branch>` checkouts. Herdr is configured only
+where a `programs.herdr` option exists.
+
+`homeModules.herdr` is core's `programs.herdr`: `enable` (default false),
+`package` (yours to supply; core pins no Herdr) and `extraConfig` in
+Herdr's own key names, rendered to TOML. Herdr writes runtime state into
+the same `config.toml`, so the file is not a store link; the wrapped
+`herdr` reconciles the keys Nix owns into the live file at launch and
+keeps the rest. It is part of `homeModules.workbench`. Flake-parts
+consumers do not get it through `flake.modules.homeManager`, where it
+could collide with a herdr module of their own; they import
+`inputs.<core>.homeModules.herdr` explicitly. A consumer that already
+carries its own `programs.herdr` module drops it in favour of core's, or
+imports `homeModules.workspace` alone.
+
+### Instance pattern
+
+The workspace root is itself a small repository. It tracks the
+declaration and a little scaffolding; the repositories beneath it are
+ordinary checkouts with their own history, and worktrees live under
+`<root>/.worktrees`. To create one:
+
+```sh
+mkdir ~/src && cd ~/src
+nix flake init -t <core>#workspace
+git init
+```
+
+This writes `flake.nix` with an empty declaration, an `.envrc` that loads
+the dev shell, and an allowlist `.gitignore` that ignores everything
+except those files and `flake.lock`, so checkouts, `.worktrees/`, the
+rendered `mani.yaml` and shell state never show up in the workspace
+repository's status. Set the core input in `flake.nix` to the flake you
+consume, declare `remotes` and `repos`, enter the shell with
+`direnv allow`, and run `mani sync`. Point Home Manager's
+`workbench.workspace.root` at the same directory.
+
 ## Consuming
 
 Internals are dendritic (every file under `modules/` is a flake-parts
@@ -43,6 +209,12 @@ Consumers do **not** need any of that — the supported surfaces are:
   project shell bootstrap.
 - `homeModules.workbench` (also `default` and legacy `agentic`) — user-tier
   (home-manager) delivery.
+- `devenvModules.workspace`, `homeModules.workspace` and `homeModules.herdr`
+  — the two [workspace](#workspace) halves and core's `programs.herdr`. The
+  devenv half is imported on its own; the Home Manager half and `herdr` are
+  also part of `homeModules.workbench`.
+- `templates.<name>` — `nix flake init -t <core>#<name>`: `default`, the
+  language variants, `adopt`, and `workspace`.
 - `flake.modules.<class>.<name>` — dendritic consumers may merge the
   namespace directly; it carries the same modules as the aliases above.
 

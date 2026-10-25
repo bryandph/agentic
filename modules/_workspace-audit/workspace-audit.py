@@ -96,7 +96,12 @@ def main() -> int:
         prog="workspace-audit",
         description="Compare the workspace declaration with the checkouts under the root. Changes nothing.",
     )
-    parser.add_argument("--root", type=Path, default=Path.cwd(), help="workspace root (default: the current directory)")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(os.environ.get("DEVENV_ROOT") or Path.cwd()),
+        help="workspace root (default: $DEVENV_ROOT inside the workspace shell, else the current directory)",
+    )
     parser.add_argument(
         "--manifest",
         type=Path,
