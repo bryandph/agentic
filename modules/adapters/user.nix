@@ -54,7 +54,12 @@
   in {
     imports = [
       inputs.mcp-servers-nix.homeManagerModules.default
-      (lib.mkAliasOptionModule ["workbench"] ["agentic"])
+      # Same key as the workspace module's alias (workspace.nix), so a
+      # configuration importing both declares `workbench` once.
+      {
+        key = "agentic/workbench-alias/homeManager";
+        imports = [(lib.mkAliasOptionModule ["workbench"] ["agentic"])];
+      }
     ];
 
     options.agentic.mcp.sharedUserConfig.enable = lib.mkEnableOption "shared user MCP delivery to ~/.config/mcp/mcp.json for compatibility clients";
