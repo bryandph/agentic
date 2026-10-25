@@ -52,7 +52,7 @@ Implementation starts only after the operator approves this change as a whole. T
 
 - [x] 8.1 `nix flake check` passes on the workstation's system
 - [x] 8.2 `nix develop -c openspec validate workbench-workspace --strict` passes
-- [ ] 8.3 Update BPH-73 with the commit links and check evidence; hand off for review. Merge needs the operator's authorisation
+- [x] 8.3 Update BPH-73 with the commit links and check evidence; hand off for review. Merge needs the operator's authorisation
 
 ## 9. BPH-73 done-when (consumer work, outside this repository)
 
@@ -60,5 +60,5 @@ These are verified in the consuming repositories under their own work, after the
 
 - [x] 9.1 Fixtures pass for a non-Gitea remote and for a flat list with no org/area structure (tasks 2.4 and 3.2 in core)
 - [ ] 9.2 The workspace instance repository uses the new schema with Area-derived paths through `defaultPath`; the audit shows no path change against the previous manifest
-- [ ] 9.3 An uncommitted core edit reaches an evaluation of the operator's infrastructure repository through `workspace-overrides` with no pin bump, and that repository's `flake.lock` is unchanged afterwards
+- [x] 9.3 An uncommitted core edit reaches an evaluation of the operator's infrastructure repository through `workspace-overrides` with no pin bump, and that repository's `flake.lock` is unchanged afterwards
 - [ ] 9.4 On both workstations (macOS and WSL), `mani sync` leaves existing checkouts untouched and `mani run` is useful (D1 validation); if not, open the vcs2l fallback as a follow-up
