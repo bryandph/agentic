@@ -37,9 +37,9 @@ Implementation starts only after the operator approves this change as a whole. T
 ## 6. Home Manager half and Herdr
 
 - [ ] 6.1 Add the `workbench.workspace` alias to the Home Manager workspace module with no behaviour change
-- [ ] 6.2 Add the org-neutral `programs.herdr` module (`enable`, `package`, `extraConfig`, live-file reconciliation), export it as `homeModules.herdr` and include it in `homeModules.workbench`/`agentic`
-- [ ] 6.3 Extend `workspace-home`: core-only consumer with Herdr enabled gets `<root>/.worktrees`; Herdr disabled writes no file or activation step; `homeModules.workspace` alone behaves as today; reconciliation keeps a runtime-written key
-- [ ] 6.4 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-home .#checks.<system>.public-surface .#checks.<system>.org-neutral --no-link`
+- [x] 6.2 Add the org-neutral `programs.herdr` module (`enable`, `package`, `extraConfig`, live-file reconciliation), export it as `homeModules.herdr` and include it in `homeModules.workbench`/`agentic`
+- [x] 6.3 Extend `workspace-home`: core-only consumer with Herdr enabled gets `<root>/.worktrees`; Herdr disabled writes no file or activation step; `homeModules.workspace` alone behaves as today; reconciliation keeps a runtime-written key (as `checks.herdr-home`, which also covers a flake-parts consumer carrying its own herdr module)
+- [x] 6.4 Gates: `nix fmt`; `nix build .#checks.<system>.workspace-home .#checks.<system>.public-surface .#checks.<system>.org-neutral --no-link`
 
 ## 7. Template and README
 
