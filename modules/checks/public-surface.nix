@@ -52,7 +52,7 @@
       && expected == toString byWorkbench.packages.${system}.${name};
   in {
     checks.public-surface = assert lib.all sameArtifact artifactNames;
-    assert lib.attrNames config.flake.templates == ["adopt" "agentic" "default" "embedded" "polyglot" "python" "rust"];
+    assert lib.attrNames config.flake.templates == ["adopt" "agentic" "default" "embedded" "polyglot" "python" "rust" "workspace"];
     assert toString config.flake.templates.agentic.path == toString config.flake.templates.default.path;
     assert config.flake.modules.flake ? agentic;
     assert config.flake.modules.flake ? workbench;
@@ -60,6 +60,8 @@
     assert config.flake.modules.devenv ? workbench;
     assert config.flake.modules.homeManager ? agentic;
     assert config.flake.modules.homeManager ? workbench;
+    assert config.flake.modules.homeManager ? herdr;
+    assert lib.all (name: config.flake.homeModules ? ${name}) ["agentic" "workbench" "default" "workspace" "herdr"];
       pkgs.runCommand "agentic-public-surface" {} ''
         touch $out
       '';
