@@ -1,0 +1,10 @@
+# Allowlist: this repository tracks only the workspace's own files. The
+# repositories declared in flake.nix are checked out beneath it as
+# independent clones, and they, the shared .worktrees/ root, the
+# generated mani.yaml and shell state all stay out by default. Re-include
+# anything else the workspace itself should track with a `!/name` line.
+/*
+!/.gitignore
+!/.envrc
+!/flake.nix
+!/flake.lock

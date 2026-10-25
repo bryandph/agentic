@@ -3,7 +3,8 @@
 # compose a language profile with the agentic devenv module — they
 # never own the project's packaging; `adopt` is the workflow-only mode
 # for existing repos (including non-flake ones): a dev-shell-only flake
-# + .envrc, the build untouched.
+# + .envrc, the build untouched. `workspace` is not a project: it is the
+# root repository of a workspace, tracking only its declaration.
 {
   flake.templates = rec {
     default = {
@@ -29,6 +30,10 @@
     adopt = {
       path = ../templates/adopt;
       description = "Workflow-only adoption for existing repos (incl. non-flake): dev-shell-only flake + .envrc, build untouched";
+    };
+    workspace = {
+      path = ../templates/workspace;
+      description = "Workspace instance: a repository that tracks only its declaration (allowlist .gitignore, .envrc, flake.nix with an empty workbench.workspace)";
     };
     agentic = default;
   };
