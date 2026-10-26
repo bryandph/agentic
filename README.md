@@ -316,9 +316,11 @@ Check mode does not run setup or hooks:
 | 1 | Failed or malformed record | Investigate, then rerun setup |
 | 2 | Missing record (or inaccessible checkout) | Run setup for the returned path |
 | 3 | Record from a different setup store path | Rerun the current setup command |
+| 4 | Not a linked worktree (a main checkout, or no repository) | Nothing; setup does not apply |
 
-Every nonzero check prints one stderr line naming the worktree, state and
-`workbench-worktree-setup --worktree <path>` action. A changed setup command
+Every nonzero check prints one stderr line naming the worktree and its state;
+codes 1–3 add the `workbench-worktree-setup --worktree <path>` action, and code
+4 says setup does not apply, so a launcher can stay silent on it. A changed setup command
 takes precedence over an older record's success/failure. These records do not
 grant trust, prove mesh acceptance, replace native harness status or authorize
 cleanup. Repository owners retain their safety flags and external-resource

@@ -59,8 +59,19 @@
           if [ "''${1:-}" = --worktree ]; then shift; fi
           [ "$#" -le 1 ] || { echo 'expected --check [<path>]' >&2; exit 64; }
           worktree="''${1:-$PWD}"
+          # Setup applies to linked worktrees only: a main checkout or a
+          # directory outside any repository has no record by design.
+          if ! git_dir="$(git -C "$worktree" -c submodule.recurse=false rev-parse --absolute-git-dir 2>/dev/null)"; then
+            printf 'worktree %s: not a git repository; worktree setup does not apply\n' "$worktree" >&2
+            exit 4
+          fi
+          common_dir="$(git -C "$worktree" -c submodule.recurse=false rev-parse --path-format=absolute --git-common-dir)"
+          if [ "$git_dir" = "$common_dir" ]; then
+            printf 'worktree %s: main checkout, not a linked worktree; worktree setup does not apply\n' "$worktree" >&2
+            exit 4
+          fi
           state=missing code=2
-          if git_dir="$(git -C "$worktree" rev-parse --absolute-git-dir 2>/dev/null)" && [ -f "$git_dir/workbench-setup.json" ]; then
+          if [ -f "$git_dir/workbench-setup.json" ]; then
             record="$git_dir/workbench-setup.json"
             if ! jq -e 'type == "object" and (.status == "ok" or .status == "failed") and (.setupCommand | type == "string")' "$record" >/dev/null 2>&1; then
               state=failed code=1
