@@ -13,7 +13,7 @@
 These tasks need implementation review and approval. They do not authorize
 changes in another owner's repository.
 
-- [ ] 2.1 In agentic, expose the existing setup and hook helpers without a creator dependency. Keep compatibility aliases until the shared retirement gate passes. Preserve both transports, the Claude hook and per-worktree hook isolation. Add G1's explicit setup result before harness launch.
+- [x] 2.1 In agentic, expose the existing setup and hook helpers without a creator dependency. Keep compatibility aliases until the shared retirement gate passes. Preserve both transports, the Claude hook and per-worktree hook isolation. Add G1's explicit setup result before harness launch.
 - [ ] 2.2 In the infrastructure repository, add G2's pre-model observations around approved launchers for Pi, Claude Code, Codex and OpenCode. A missing or failed Pi trust projection only warns and never blocks launch. A real trust, authentication or input prompt still prevents assignment acceptance.
 - [ ] 2.3 In the infrastructure repository, add G3's attempt and session reconciliation. Preserve the native harness history, Cotal messages and any selected durable run journal. Fence an old attempt before replacement. Do not assume Cotal resume support for Codex or OpenCode.
 - [ ] 2.4 Propose the G3/G4 watcher in design.md. Run it outside model turns with G4 process ownership. Observe connector queue progress, held delivery, native pane state, explicit harness conditions and deadlines. DM the bound operator-seat coordinator on held or expired work or stopped turn consumption, including provider rate limits. The seat raises the issue with the operator. Keep the proposed DM fields, reply correlation and duplicate handling.
