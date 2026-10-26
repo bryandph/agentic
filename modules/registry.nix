@@ -26,6 +26,7 @@
       ./registry/_bundle.nix
       ./registry/_agents.nix
       ./registry/_memory-plane.nix
+      ./registry/_worktree.nix
       ./registry/_workmux.nix
       ./registry/_ci-cache.nix
       ./registry/_bootstrap.nix

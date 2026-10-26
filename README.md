@@ -233,6 +233,97 @@ expose `pi-agent-roles`, a package of specialist prompt templates compiled from
 the agent registry. See [Pi delivery](docs/pi.md) for ownership, native paths,
 compatibility, and targeted checks.
 
+### Worktree setup and verified teardown
+
+Both shell transports include `workbench-worktree-setup` and
+`workbench-worktree-teardown`. Run them from the main checkout's dev shell
+against the path returned by the creator; do not infer it from the branch name.
+The coordinator owns this sequence:
+
+1. `herdr worktree create --cwd <repo> --branch <branch> --base <base> --no-focus`
+   — record the returned checkout path, workspace ID and pane ID.
+2. `workbench-worktree-setup --worktree <path>` — await its result.
+3. Inspect `workbench-worktree-setup --check <path>`, then launch the selected
+   worker in its exact pane. Failed, missing or stale setup is a **warning to
+   act on, never a launcher block**; it is not evidence of readiness. Resolve
+   the failure before claiming the assignment is ready or accepted.
+4. After review and repository-specific resource reconciliation, run
+   `workbench-worktree-teardown --worktree <path>`.
+5. Only after teardown succeeds and the tree is safe to remove, the coordinator
+   runs `herdr worktree remove --workspace <id>`. Stock Git refuses removal
+   of worktrees containing initialized submodules, even after deinit: only for
+   a coordinator-owned worktree, after successful teardown and a clean
+   `git status`, the coordinator may choose
+   `herdr worktree remove --workspace <id> --force`. Never force dirty or
+   ambiguously owned trees. A failed cleanup vetoes removal. Teardown never
+   deletes a checkout, forces Git removal or adopts resources of uncertain
+   ownership.
+
+Both runners default to the current directory. Setup preserves per-worktree
+copies, isolated writable `.direnv`/`.devenv` state, and Git hooks. Declared
+submodules initialize recursively, before shell warm-up. Warm-up failure is a
+setup failure, not success with a warning. Rerunning setup is idempotent for
+unchanged repository inputs; repository hooks must also be safe to repeat.
+
+LAB-178: a recursive `git reset --hard` before submodule initialization can
+leave a config-only submodule gitdir. Setup detects this and fails closed at
+`submodule-stub`, naming the path without changing the stub or its checkout.
+For manual, data-preserving repair, move **both** that gitdir and the submodule
+working directory to backups outside the worktree, inspect and preserve their
+contents, then run `git submodule update --init --recursive` and rerun setup.
+Never delete a stub blindly or reset a fresh worktree before setup. Earlier
+Git discovery commands use command-local `-c submodule.recurse=false`; setup
+never changes the caller's recursion policy.
+
+Configure `workbench.worktree` (or `agentic.worktree`):
+
+- `traits.submodules`: recursively initialize submodules (default false).
+- `traits.secretDotfiles`: files copied, never shared (default empty).
+- `copyFiles`: copy absent files from the main checkout (default
+  `[".envrc" ".claude"]`).
+- `setupHooks` and `teardownHooks`: ordered lists of shell command strings.
+  Each runs in a separate strict Bash process with the worktree as cwd; changes
+  to environment or cwd do not carry into the next hook. Reference packages
+  through their store paths for reproducible dependencies. Hook names in
+  diagnostics are zero-based, for example `setupHooks[0]`. Setup hooks run
+  after the built-in preparation and must exit zero. Every teardown hook must
+  exit zero **and** print a stdout line beginning `verified:`; any stdout
+  containing `skipped` (case-insensitive) fails, even alongside a verification
+  line. Hooks must verify actual resource absence, not merely command dispatch.
+  A failure stops the runner; no declared teardown hooks succeeds with a note.
+
+`agentic.worktreeLib.{setupScript,hooksScript,teardownScript} pkgs` exposes the
+same runners and the Git-hook isolation helper. During this additive stage,
+`agentic.workmux.{traits,copyFiles}` and `agentic.workmuxLib.*` remain silent
+compatibility aliases; `worktreeHooksScript` still names the Git helper.
+`agentic-worktree-setup` remains an executable alias. Generated
+`.workmux.yaml` and the Claude `WorktreeCreate` hook both call the canonical
+setup command; no Workmux functionality is removed.
+
+#### Setup result and check codes
+
+Setup atomically writes `workbench-setup.json` inside the target's own
+`git rev-parse --absolute-git-dir`, including on failure after Git discovery.
+It contains `status` (`ok|failed`), `failedStep` (string or null),
+`warmUp` (`{status, exitCode}`, with status `not-run|skipped|ok|failed`),
+UTC `startedAt`/`finishedAt` timestamps, and `setupCommand` (the canonical
+executable's store path). Failed setup exits nonzero; invalid arguments exit 64.
+Check mode does not run setup or hooks:
+
+| `--check [<path>]` exit | Meaning | Next action |
+| --- | --- | --- |
+| 0 | Current successful record | Continue observing actual harness readiness |
+| 1 | Failed or malformed record | Investigate, then rerun setup |
+| 2 | Missing record (or inaccessible checkout) | Run setup for the returned path |
+| 3 | Record from a different setup store path | Rerun the current setup command |
+
+Every nonzero check prints one stderr line naming the worktree, state and
+`workbench-worktree-setup --worktree <path>` action. A changed setup command
+takes precedence over an older record's success/failure. These records do not
+grant trust, prove mesh acceptance, replace native harness status or authorize
+cleanup. Repository owners retain their safety flags and external-resource
+lifecycle policy.
+
 ### Agent role projections
 
 `agentic.agents.<name>` composes knowledge fragments, scope, capabilities, and

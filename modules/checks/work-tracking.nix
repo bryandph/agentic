@@ -67,7 +67,8 @@
     assert p.collections.child.path == "child/.okf";
     assert q.skills == [];
     assert q.index == "user";
-    assert q.packages == [];
+    # Only the two always-present worktree commands; no optional tracking/search.
+    assert map (p: p.name) q.packages == ["workbench-worktree-setup" "workbench-worktree-teardown"];
       pkgs.runCommand "agentic-work-tracking" {
         nativeBuildInputs = [pkgs.git pkgs.gnugrep backlog];
       } ''
