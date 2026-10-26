@@ -163,6 +163,15 @@
           fi
         }
         expect_check 2 "$TMPDIR/one"
+        # Not applicable: the main checkout and a directory outside any
+        # repository get exit 4 and no advice to run setup.
+        mkdir "$TMPDIR/plain"
+        for na in "$TMPDIR/main" "$TMPDIR/plain"; do
+          expect_code 4 ${setup} --check "$na"
+          test "$(wc -l < "$TMPDIR/stderr" | tr -d ' ')" = 1
+          grep -F 'worktree setup does not apply' "$TMPDIR/stderr"
+          ! grep -F 'run workbench-worktree-setup' "$TMPDIR/stderr"
+        done
         # LAB-178 reproduction: a recursive reset before init creates a
         # config-only gitdir. Setup must preserve it and fail closed, not repair.
         LC_ALL=C git -C main worktree add -b fixture-bad "$TMPDIR/bad" main
