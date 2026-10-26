@@ -49,6 +49,7 @@ in {
     ./modules/registry/_bundle.nix
     ./modules/registry/_agents.nix
     ./modules/registry/_memory-plane.nix
+    ./modules/registry/_worktree.nix
     ./modules/registry/_workmux.nix
     ./modules/registry/_bootstrap.nix
     ./modules/registry/_core-fragments.nix
@@ -61,6 +62,6 @@ in {
   claude.code.hooks.agentic-worktree-setup = {
     hookType = "WorktreeCreate";
     name = "agentic-worktree-setup";
-    command = "${config.agentic.workmuxLib.setupScript pkgs}/bin/agentic-worktree-setup";
+    command = "${config.agentic.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup";
   };
 }

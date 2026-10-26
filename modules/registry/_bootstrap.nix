@@ -104,7 +104,8 @@ in {
     # equivalent Pi relies on), when the consumer declares collections,
     # and `backlog` when work tracking is enabled.
     packages = pkgs:
-      lib.optional (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.wrapper pkgs)
+      [(acfg.worktreeLib.setupScript pkgs) (acfg.worktreeLib.teardownScript pkgs)]
+      ++ lib.optional (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.wrapper pkgs)
       ++ lib.optional (acfg.workTracking.prefix != null && acfg.workTracking.lib.package pkgs != null) (acfg.workTracking.lib.package pkgs);
 
     # The devenv module body — identical under both transports.
@@ -122,7 +123,7 @@ in {
       # dir first, whoever created it, so one worktree's install never
       # replaces (or, once removed, breaks) another checkout's hook.
       tasks."agentic:worktree-hooks" = lib.mkIf (config.git-hooks.enable or false) {
-        exec = "${acfg.workmuxLib.worktreeHooksScript pkgs}/bin/agentic-worktree-hooks";
+        exec = "${acfg.worktreeLib.hooksScript pkgs}/bin/agentic-worktree-hooks";
         before = ["devenv:git-hooks:install"];
       };
       # One worktree setup path for ALL creators (agentic-devenv spec):
@@ -133,7 +134,7 @@ in {
       claude.code.hooks.agentic-worktree-setup = {
         hookType = "WorktreeCreate";
         name = "agentic-worktree-setup";
-        command = "${acfg.workmuxLib.setupScript pkgs}/bin/agentic-worktree-setup";
+        command = "${acfg.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup";
       };
     };
   };

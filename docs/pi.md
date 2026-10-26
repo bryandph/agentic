@@ -59,8 +59,50 @@ it.
 
 Role templates reuse the exact compiled body from the other renderers and add
 capability instructions plus `$ARGUMENTS`. They are ordinary prompts in the
-current session, not an enforced tool sandbox or native subagents. Workmux owns
-separate workers; no `.pi/agents` registry or orchestration extension is added.
+current session, not an enforced tool sandbox or native subagents. Coordinators
+own separate workers through their selected creator (including Herdr or the
+existing Workmux path); no `.pi/agents` registry or orchestration extension is added.
+
+## Coordinator worktrees
+
+The repository shell supplies creator-neutral setup and verified teardown for
+Pi as well as the other harnesses. The coordinator runs:
+
+```text
+herdr worktree create --cwd <repo> --branch <branch> --base <base> --no-focus
+workbench-worktree-setup --worktree <returned-path>
+workbench-worktree-setup --check <returned-path>
+<launch the selected worker in the returned pane>
+<review results and reconcile repository-owned resources>
+workbench-worktree-teardown --worktree <returned-path>
+herdr worktree remove --workspace <returned-workspace-id>
+```
+
+Wait for setup before launching. Check exits 0 for current success, 1 for
+failure, 2 for a missing result and 3 for a stale setup executable. A nonzero
+check emits one actionable warning, **never a launcher block**. Act on the
+warning; do not mistake process launch for setup success or assignment
+acceptance. Trust projection is also warning-only; an actual Pi trust or
+authentication prompt still needs operator attention. Core never grants trust.
+
+Setup runs declared recursive submodule initialization, file copies, state and
+Git-hook isolation, shell warm-up, then ordered `workbench.worktree.setupHooks`.
+Its JSON result lives in the worktree's own gitdir, not a shared checkout file.
+Warm-up failure is recorded as failure. `agentic-worktree-setup` remains an
+alias, and existing Workmux creation remains supported during this stage.
+
+Each `workbench.worktree.teardownHooks` command must exit zero and print a
+stdout line starting `verified:`, without printing `skipped`. Any failure
+stops cleanup and vetoes removal; no hooks succeeds with a note. Only the
+coordinator removes a reviewed, safe worktree after verified cleanup; the
+runner never removes it or uses force. Stock Git refuses removal of a
+worktree with initialized submodules even after deinit; after verified teardown
+and clean `git status`, its owning coordinator may choose
+`herdr worktree remove --workspace <returned-workspace-id> --force`. Never force
+dirty or ambiguously owned trees. A `submodule-stub` setup failure instead
+requires the manual, data-preserving backup repair described in the README;
+setup does not auto-repair or delete submodule state. See the
+[setup options, result schema and exit codes](../README.md#worktree-setup-and-verified-teardown).
 
 ## Legacy adapter compatibility
 

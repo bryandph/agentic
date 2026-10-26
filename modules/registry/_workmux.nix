@@ -1,37 +1,6 @@
-# Generated .workmux.yaml + the single worktree-setup script (design
-# D6, agentic-devenv spec, tasks 4.2/4.3).
-#
-# Defaults are TRAIT-KEYED, not universal:
-#   * submodules -> the setup script re-inits them (worktrees don't
-#     carry submodule state).
-#   * secret-bearing dotfiles (vault-resolved `.env` and friends) are
-#     COPIED per worktree, never symlink-shared.
-#
-# One worktree setup path for all creators: the generated
-# `.workmux.yaml` `post_create` and the Claude Code `WorktreeCreate`
-# hook (wired via devenv's first-party `claude.code.hooks` in the
-# devenv adapter) invoke the SAME script, so the two paths cannot
-# drift.
-#
-# Per-worktree state, always: `.direnv`/`.devenv` are never shared.
-# `.devenv` holds a locked task database and runtime/state dirs, and
-# sandboxed agents (Codex) cannot write through links into the main
-# checkout. A fresh worktree shell costs seconds because outputs come
-# from the shared Nix store. Git hooks are per-worktree too: devenv
-# installs hooks with an absolute config path into the shared hooks
-# dir, so the last worktree to enter its shell would own every
-# worktree's hook, and removing it would break commits everywhere. The
-# script enters the dev shell once, outside any agent sandbox, so
-# managed files exist before a sandboxed agent (which may not write
-# .codex/) starts.
-#
-# Detect-and-degrade (4.3) lives HERE, outside the shell: the setup
-# script probes flake git-discovery BEFORE placing anything; on the
-# known worktree-of-a-submodule failure it emits the constraint + the
-# `nix shell` workaround and exits without partial artifacts.
-# (Re-tested 2026-07-15 under devenv 2.1.2 + Nix 2.34.7: the historical
-# init failure no longer reproduces — the probe is a cheap safety net,
-# not the expected path.)
+# Generated Workmux configuration, retained throughout additive migration.
+# Creator-neutral preparation and hook isolation live in _worktree.nix;
+# the legacy options and helper exports below are silent compatibility aliases.
 {
   lib,
   config,
@@ -39,104 +8,7 @@
 }: let
   cfg = config.agentic.workmux;
 
-  # Per-worktree git hooks dir for a linked worktree (shared by the
-  # setup script and the devenv task that runs before hook install).
-  # Enabling extensions.worktreeConfig makes git read core.worktree and
-  # core.bare from per-worktree config, so first move them out of the
-  # shared config into the main worktree's config.worktree (git-worktree
-  # CONFIGURATION FILE); submodule gitdirs always set core.worktree.
-  worktreeHooksScript = pkgs:
-    pkgs.writeShellApplication {
-      name = "agentic-worktree-hooks";
-      runtimeInputs = [pkgs.git];
-      text = ''
-        git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
-        common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
-        [ "$git_dir" != "$common_dir" ] || exit 0
-        if [ "$(git config --file "$common_dir/config" --get extensions.worktreeConfig || true)" != true ]; then
-          for key in core.worktree core.bare; do
-            value="$(git config --file "$common_dir/config" --get "$key" || true)"
-            if [ -n "$value" ] && { [ "$key" = core.worktree ] || [ "$value" = true ]; }; then
-              git config --file "$common_dir/config.worktree" "$key" "$value"
-              git config --file "$common_dir/config" --unset "$key"
-            fi
-          done
-          git config --file "$common_dir/config" extensions.worktreeConfig true
-        fi
-        if [ "$(git config --worktree --get core.hooksPath || true)" != "$git_dir/hooks" ]; then
-          git config --worktree core.hooksPath "$git_dir/hooks"
-        fi
-      '';
-    };
-
-  setupScript = pkgs:
-    pkgs.writeShellApplication {
-      name = "agentic-worktree-setup";
-      runtimeInputs = [pkgs.git];
-      text = ''
-        # Degrade check FIRST (before any artifact lands): the known
-        # failure mode is nix/devenv unable to resolve the repo under
-        # a worktree-of-a-submodule's double gitdir indirection.
-        if ! nix flake metadata --json >/dev/null 2>&1; then
-          if [ -f .git ] && grep -q '\.git/modules/' .git 2>/dev/null; then
-            echo "agentic: nix cannot initialize in this worktree of a SUBMODULE" >&2
-            echo "  (gitdir indirection: .git -> parent/.git/modules/<sub>/worktrees/<name>)." >&2
-            echo "  Dev-shell tools are unavailable here. Workaround: invoke tools via" >&2
-            echo "    nix shell nixpkgs#<tool> --command <tool> ..." >&2
-            echo "  Do NOT edit .envrc per-worktree." >&2
-            exit 1
-          fi
-          echo "agentic: nix flake discovery failed in this worktree (not the submodule constraint) — investigate before continuing." >&2
-          exit 1
-        fi
-
-        main_wt="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
-
-        ${lib.optionalString cfg.traits.submodules ''
-          # Worktrees don't carry submodule state.
-          git submodule update --init
-        ''}
-
-        # Per-worktree copies (secret-bearing files are never shared;
-        # .envrc/direnv grants are per-directory).
-        for f in ${lib.escapeShellArgs (cfg.copyFiles ++ cfg.traits.secretDotfiles)}; do
-          if [ ! -e "$f" ] && [ -e "$main_wt/$f" ]; then
-            cp -R "$main_wt/$f" "$f"
-          fi
-        done
-
-        # Worktrees created before devenv state stopped being shared
-        # still link into the main checkout; replace those links.
-        for d in .direnv .devenv; do
-          if [ -L "$d" ] && [ "$(readlink "$d")" = "$main_wt/$d" ]; then
-            rm "$d"
-          fi
-        done
-
-        # Linked worktrees install git hooks into their own gitdir.
-        ${worktreeHooksScript pkgs}/bin/agentic-worktree-hooks
-
-        command -v direnv >/dev/null 2>&1 && direnv allow || true
-
-        # Enter the dev shell once, here, before any agent runs. Shell
-        # entry places managed files (.codex/config.toml, agent dirs,
-        # git hooks); agent sandboxes forbid some of those writes (Codex
-        # protects .codex/), but accept an already-correct placement.
-        # Call the shell directly: `direnv exec` is a no-op under
-        # nix_direnv_manual_reload.
-        # devenv.nix marks the devenv-native transport (a flake may also
-        # exist without a devShell); otherwise the flake adapter.
-        warm_status=0
-        if [ -f devenv.nix ] && command -v devenv >/dev/null 2>&1; then
-          devenv shell -- true >/dev/null 2>&1 || warm_status=$?
-        elif [ -f flake.nix ]; then
-          nix develop --impure -c true >/dev/null 2>&1 || warm_status=$?
-        fi
-        if [ "$warm_status" != 0 ]; then
-          echo "agentic: dev shell warm-up failed; sandboxed agents may be unable to enter it" >&2
-        fi
-      '';
-    };
+  inherit (config.agentic.worktreeLib) setupScript;
 
   yamlBody =
     {
@@ -158,7 +30,7 @@
   configFile = pkgs: let
     body = (pkgs.formats.yaml {}).generate "workmux-body.yaml" (yamlBody
       // {
-        post_create = ["${setupScript pkgs}/bin/agentic-worktree-setup"];
+        post_create = ["${setupScript pkgs}/bin/workbench-worktree-setup"];
       });
     header = pkgs.writeText "workmux-header" ''
       # GENERATED by the agentic devenv module — do not edit; override via
@@ -185,27 +57,12 @@
       cat ${header} ${body} > $out
     '';
 in {
+  imports = [
+    (lib.mkAliasOptionModule ["agentic" "workmux" "traits"] ["agentic" "worktree" "traits"])
+    (lib.mkAliasOptionModule ["agentic" "workmux" "copyFiles"] ["agentic" "worktree" "copyFiles"])
+  ];
+
   options.agentic.workmux = {
-    traits = {
-      submodules = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = "Repo has git submodules (setup script re-inits them per worktree).";
-      };
-      secretDotfiles = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [];
-        example = [".env"];
-        description = "Secret-bearing dotfiles copied per worktree, never symlink-shared.";
-      };
-    };
-
-    copyFiles = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [".envrc" ".claude"];
-      description = "Files copied from the main worktree into each new worktree when absent.";
-    };
-
     mainBranch = lib.mkOption {
       type = lib.types.str;
       default = "main";
@@ -272,5 +129,9 @@ in {
     description = "`configFile pkgs` (the generated .workmux.yaml), `setupScript pkgs` (the single worktree-setup entrypoint), and `worktreeHooksScript pkgs` (per-worktree git hooks dir, also run by the devenv shell).";
   };
 
-  config.agentic.workmuxLib = {inherit configFile setupScript worktreeHooksScript;};
+  config.agentic.workmuxLib = {
+    inherit configFile setupScript;
+    inherit (config.agentic.worktreeLib) hooksScript teardownScript;
+    worktreeHooksScript = config.agentic.worktreeLib.hooksScript;
+  };
 }
