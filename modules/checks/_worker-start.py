@@ -1,6 +1,7 @@
 """Sandbox fixtures: no live Herdr, trust store, network or model."""
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -33,6 +34,12 @@ if os.environ["CASE"] == "exit":
     print("\\n".join("old line " + str(i) for i in range(60)))
     print("\\x1b[31mOption '--prompt' argument is ambiguous\\x1b[0m", file=sys.stderr)
     sys.exit(2)
+if os.environ["CASE"] == "trust-idle":
+    print("\\n".join("old line " + str(i) for i in range(60)))
+    for i in range(30): print("row" + str(i) + ": " + "abcdef😀" * 100)
+    print("─" * 3000)
+    print("\\x1b[35mTrust project folder?\\x1b[0m")
+    print("─" * 3000)
 ''')
     executable("herdr", '''import json,os,sys,subprocess
 from pathlib import Path
@@ -68,7 +75,10 @@ elif a[:2] == ["agent", "wait"]:
     assert a[3:7] == ["--until", "working", "--until", "blocked"]
     sys.exit(1)
 elif a[:2] == ["agent", "explain"]:
-    print(json.dumps({"fallback_reason":"default_known_agent_idle_fallback", "visible_blocker":False}))
+    print(json.dumps({"state":"idle", "fallback_reason":"default_known_agent_idle_fallback",
+      "visible_blocker":False, "visible_idle":False, "visible_working":False,
+      "manifest_version":"2026.10.01.1", "matched_rule":None,
+      "evaluated_rules":[{"evidence":{"region_preview":"sensitive buffer" * 5000}}]}))
 else: raise AssertionError(a)
 ''')
     prompt = root / "prompt with ' quotes.md"
@@ -92,28 +102,42 @@ else: raise AssertionError(a)
             (root / name).unlink(missing_ok=True)
         result = subprocess.run([sys.argv[1], "--pane", "w:p", "--worktree", str(root),
                                  "--timeout", "0.8", "--", "launcher", "--prompt-file",
-                                 str(prompt) if case != "prompt-missing" else "absent", weird],
+                                 str(prompt) if case != "prompt-missing" else "absent", weird, "---"],
                                 env=dict(env, CASE=case), capture_output=True, text=True)
         assert result.returncode == code, (case, result)
         record = json.loads(result.stdout)
         assert record["status"] == status, (case, record)
         assert len(record["evidence"].splitlines()) <= 40
         assert "\x1b" not in record["evidence"]
+        for field in ("evidence", "diagnostics"):
+            assert len(record[field].encode("utf-8")) <= 4096, (case, field)
+            assert all(len(line) <= 240 for line in record[field].splitlines()), (case, field)
         if case.startswith("setup-") or case in ("prompt-missing", "pane-missing", "wrong-cwd", "occupied", "busy-shell", "run-rejected"):
             assert not (root / "launched").exists()
         else:
             calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
             assert sum(call[:2] == ["pane", "run"] for call in calls) == 1
-            assert json.loads((root / "argv").read_text())[-1] == weird
+            assert json.loads((root / "argv").read_text())[-2:] == [weird, "---"]
         if case == "exit":
             assert "Option '--prompt' argument is ambiguous" in record["evidence"], record
             assert "foreground returned to shell" in record["reason"]
         if case == "started":
             assert record["session"] == "native-session.jsonl"
+            expected = "workbench-worker-start: launching: " + shlex.join(
+                ["launcher", "--prompt-file", str(prompt), weird, "---"])
+            assert expected in (root / "tail").read_text()
+            assert "workbench-worker-start: launching: launcher --prompt-file" in record["evidence"]
         if case == "trust-idle":
             assert record["agentStatus"] == "idle"
             assert record["fallback_reason"] == "default_known_agent_idle_fallback"
             assert record["visible_blocker"] is False
+            assert "Trust project folder?" in record["evidence"]
+            assert "─…(×3000)" in record["evidence"]
+            details = json.loads(record["diagnostics"])
+            assert set(details) == {"state", "fallback_reason", "visible_blocker", "visible_idle",
+                                    "visible_working", "manifest_version", "matched_rule"}
+            assert details["manifest_version"] == "2026.10.01.1"
+            assert "region_preview" not in record["diagnostics"]
         if case == "timeout":
             assert "timeout" in record["reason"]
         print(case, "ok")

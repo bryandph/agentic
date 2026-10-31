@@ -15,7 +15,12 @@ ANSI = re.compile(r"\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-_])"
 
 
 def tail(text):
-    return "\n".join(line.rstrip() for line in ANSI.sub("", text).splitlines()[-40:])[-16000:]
+    lines = []
+    for line in ANSI.sub("", text).splitlines()[-40:]:
+        line = re.sub(r"(.)\1{7,}", lambda match: f"{match[1]}…(×{len(match[0])})", line.rstrip())
+        lines.append(line[:240])
+    # UTF-8 byte cap is stricter than the character cap for Unicode terminals.
+    return "\n".join(lines).encode("utf-8")[-4096:].decode("utf-8", errors="ignore")
 
 
 def main():
@@ -102,8 +107,10 @@ def main():
     # apostrophes, newlines, dollars and leading dashes. No exec: the pane's
     # interactive shell survives failures, retaining their terminal evidence.
     payload = json.dumps(argv).encode().hex()
-    command = (f"{sys.executable} -c 'import json,subprocess; "
-               f'raise SystemExit(subprocess.call(json.loads(bytes.fromhex("{payload}"))))\'')
+    command = (f"{sys.executable} -c 'import json,shlex,subprocess; "
+               f'argv=json.loads(bytes.fromhex("{payload}")); '
+               'print("workbench-worker-start: launching:", shlex.join(argv), flush=True); '
+               'raise SystemExit(subprocess.call(argv))\'')
     code, _, message = herdr("pane", "run", args.pane, command)
     if code:
         diagnostics.append(message)
@@ -137,11 +144,16 @@ def main():
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             _, _, output = herdr("agent", "explain", args.pane, "--json")
-            diagnostics.append(output)
             try:
-                explanation = json.loads(output)
-            except ValueError:
+                full = json.loads(output)
+                # Keep lifecycle facts, not the repeated detector buffer previews.
+                keys = ("state", "fallback_reason", "visible_blocker", "visible_idle",
+                        "visible_working", "manifest_version", "matched_rule")
+                explanation = {key: full[key] for key in keys if key in full}
+                diagnostics.append(json.dumps(explanation, ensure_ascii=False, indent=2))
+            except (ValueError, TypeError):
                 explanation = {}
+                diagnostics.append(output)
             status = "not-started" if info.get("agent") else "launch-failed"
             return finish(status, "timeout: Herdr did not observe working or blocked")
         # Short waits allow evidence collection even when a process/pane exits.

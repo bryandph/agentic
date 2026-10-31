@@ -313,8 +313,12 @@ The coordinator owns this sequence:
 `workbench-worker-start` prints one JSON record with `status`, `pane`,
 `workspace`, `worktree`, `agent`, native `session`, `agentStatus`, `evidence`,
 `reason`, `fallback_reason`, `visible_blocker`, `diagnostics` and `ts`. Evidence is an ANSI-stripped pane tail of at
-most 40 lines (also capped at 16,000 characters); diagnostics carry setup
-errors or Herdr explanations separately. Exit codes are 0 `started`, 10
+most 40 lines, 240 characters per line and 4,096 UTF-8 bytes total. Runs of
+eight or more identical characters collapse to a short count marker. Diagnostics
+use the same bounds and carry setup errors or Herdr lifecycle facts separately
+(state, fallback reason, visible-state flags, manifest version and matched rule),
+without detector buffer previews. The pane also prints the human-readable,
+shell-quoted launcher command before starting it. Exit codes are 0 `started`, 10
 `blocked`, 11 `not-started`, 20 `launch-failed`, 30 `setup-failed`; argument errors are CLI
 misuse. Timeout is in seconds; unclassified startup or an undetected agent
 fails closed. A detected agent that never reaches working/blocked returns
