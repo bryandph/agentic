@@ -278,9 +278,12 @@ never changes the caller's recursion policy.
 Configure `workbench.worktree` (or `agentic.worktree`):
 
 - `traits.submodules`: recursively initialize submodules (default false).
-- `traits.secretDotfiles`: files copied, never shared (default empty).
-- `copyFiles`: copy absent files from the main checkout (default
-  `[".envrc" ".claude"]`).
+- `traits.secretDotfiles`: paths or shell globs copied, never shared (default empty).
+- `copyFiles`: paths or shell globs copied when absent from the new worktree
+  (default `[".envrc" ".claude"]`). Both lists expand against the main checkout,
+  for example `[".env.*" "config/*.local"]`. Matching files retain their relative
+  paths, with parent directories created as needed; existing destinations are
+  skipped and patterns with no match are ignored.
 - `setupHooks` and `teardownHooks`: ordered lists of shell command strings.
   Each runs in a separate strict Bash process with the worktree as cwd; changes
   to environment or cwd do not carry into the next hook. Reference packages
