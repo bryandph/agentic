@@ -53,6 +53,7 @@ in {
     ./modules/registry/_workmux.nix
     ./modules/registry/_bootstrap.nix
     ./modules/registry/_core-fragments.nix
+    ./modules/_git-hooks/devenv.nix
     (builtins.toPath "${locked "mcp-servers-nix"}/modules/devenv.nix")
   ];
 

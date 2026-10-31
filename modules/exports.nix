@@ -25,6 +25,7 @@
     flake.agentic.imports = [inputs.flake-parts.flakeModules.modules];
     homeManager.agentic = {};
     devenv.agentic = {};
+    devenv.git-hooks = import ./_git-hooks/devenv.nix;
     flake.workbench = config.flake.modules.flake.agentic;
     homeManager.workbench = config.flake.modules.homeManager.agentic;
     devenv.workbench = config.flake.modules.devenv.agentic;
@@ -47,6 +48,8 @@
       # Workspace layout (repo manifest -> mani.yaml); inert
       # until `agentic.workspace.repos` is set.
       inherit (config.flake.modules.devenv) workspace;
+      # Standalone per-checkout hook isolation, GC roots, and doctor.
+      inherit (config.flake.modules.devenv) git-hooks;
     };
 
     homeModules = {

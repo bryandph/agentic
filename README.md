@@ -233,6 +233,53 @@ expose `pi-agent-roles`, a package of specialist prompt templates compiled from
 the agent registry. See [Pi delivery](docs/pi.md) for ownership, native paths,
 compatibility, and targeted checks.
 
+### Standalone self-healing Git hooks
+
+A devenv shell can opt into hook isolation and GC protection without the
+registry, MCP configuration, or full shell bootstrap:
+
+```nix
+# In a consumer's flake-parts module (with the agentic input available):
+{ inputs, ... }: {
+  perSystem = { ... }: {
+    devenv.shells.default = {
+      imports = [ inputs.agentic.devenvModules.git-hooks ];
+      git-hooks.enable = true;
+      # Configure git-hooks.hooks as usual; use prek as the hook package.
+    };
+  };
+}
+```
+
+Consumers already importing `flakeModules.agentic` can instead use
+`config.agentic.devenvLib.gitHooksModule` in the same `imports` list. Both
+surfaces are the same standalone module. The full shell module (including the
+native transport) already imports it.
+
+Before devenv installs hooks, linked checkouts get their own Git hooks directory;
+after installation, each embedded prek store output gets an indirect GC root
+inside `git rev-parse --git-path hooks`. Re-entry replaces obsolete managed
+roots. Removing the checkout's gitdir removes those roots; this does not root
+the hook configuration or repair old hooks in other checkouts automatically.
+Root registration uses unprivileged `nix-store --add-root --indirect --realise`
+and warns without blocking shell entry if the Nix daemon cannot register it.
+On registration failure it leaves previous roots alone; GC protection is not
+guaranteed in that environment.
+
+`agentic-hooks-doctor [--fix] [repository]` scans the main gitdir, submodule
+gitdirs (including deinitialized submodules), and their linked worktrees for
+prek-generated hooks with missing executables or configurations. It is included
+in the module and `agentic.devenvLib.packages`; without a shell, run
+`nix run <agentic>#agentic-hooks-doctor -- /path/to/repo`. Reports exit 1 when
+dangling hooks are found, including on `--fix`; a clean scan exits 0 and an
+operational error exits 2. `--fix` unlinks only the reported generated hook
+files, never hand-written hooks, configurations, GC roots, or gitdirs. Shared
+hooks with relative or default configs are removed only when invalid for every
+checkout they serve. A config missing from only some checkouts is reported but
+the shared hook is retained; isolate those checkouts by entering their shells.
+Re-enter
+the affected checkout's shell to install a fresh hook afterwards.
+
 ### Worktree setup and verified teardown
 
 Both shell transports include `workbench-worktree-setup` and
