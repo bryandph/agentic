@@ -32,6 +32,19 @@
 }: let
   cfg = config.agentic;
 
+  # One vocabulary drives both the closed option type and its prose.
+  authorityActions = {
+    merge-own-repo = "merge and push your own repository's branches";
+    push-own-branch = "push your own working branch";
+    deploy-manual = "deploy manually";
+    cluster-out-of-git = "change the cluster outside git";
+    secrets = "access or change secrets";
+    delete-remote = "delete or archive remote repositories";
+    cross-repo = "work across repositories";
+    set-work-status-final = "set final work-item statuses";
+  };
+  authorityListType = lib.types.listOf (lib.types.enum (lib.attrNames authorityActions));
+
   reasoningEffortType = lib.types.nullOr (lib.types.enum ["minimal" "low" "medium" "high" "xhigh" "max" "ultra"]);
   profileType = lib.types.submodule {
     options = let
@@ -100,6 +113,19 @@
           type = lib.types.listOf lib.types.str;
           default = [];
           description = "Keys of agentic.agents to hand off to when a task crosses out of scope; unknown names fail rendering on every platform.";
+        };
+      };
+
+      authority = {
+        autonomous = lib.mkOption {
+          type = authorityListType;
+          default = [];
+          description = "Action classes the agent may perform without asking; disjoint from decision, with no duplicates.";
+        };
+        decision = lib.mkOption {
+          type = authorityListType;
+          default = [];
+          description = "Action classes requiring a decision from cotal.escalateTo, or the operator when unset; disjoint from autonomous, with no duplicates.";
         };
       };
 
@@ -231,7 +257,16 @@
 
   # --- compiled body (shared across platforms) ---------------------
 
-  validateAgent = name: agent:
+  validateAgent = name: agent: let
+    overlap = lib.intersectLists agent.authority.autonomous agent.authority.decision;
+    duplicates = actions: lib.unique (lib.filter (action: lib.count (other: other == action) actions > 1) actions);
+  in
+    assert lib.assertMsg (overlap == [])
+    "agentic.agents.${name}: authority.autonomous and authority.decision overlap: ${lib.concatStringsSep ", " (lib.unique overlap)}";
+    assert lib.all (list:
+      lib.assertMsg (duplicates agent.authority.${list} == [])
+      "agentic.agents.${name}: authority.${list} has duplicate classes: ${lib.concatStringsSep ", " (duplicates agent.authority.${list})}")
+    ["autonomous" "decision"];
     assert lib.all (target:
       lib.assertMsg (builtins.hasAttr target cfg.agents)
       "agentic.agents.${name}: scope.delegateTo names unknown agent '${target}'")
@@ -250,6 +285,16 @@
     lib.optionalString (agent.scope.paths != []) "Operate only within: ${lib.concatStringsSep ", " (map (p: "`${p}`") agent.scope.paths)}.\n"
     + lib.optionalString (agent.scope.forbidden != []) "Never read, modify, or act on: ${lib.concatStringsSep ", " (map (p: "`${p}`") agent.scope.forbidden)}.\n"
     + lib.optionalString (agent.scope.delegateTo != []) "If a task crosses out of this scope, hand off to: ${lib.concatStringsSep ", " agent.scope.delegateTo}.\n";
+
+  authoritySentences = agent: let
+    describe = actions: lib.concatStringsSep "; " (map (action: authorityActions.${action}) actions);
+    target =
+      if agent.cotal.escalateTo == null
+      then "the operator"
+      else "the peer with Cotal role `${cfg.agents.${agent.cotal.escalateTo}.cotal.role}` (find that peer on the roster by role)";
+  in
+    lib.optionalString (agent.authority.autonomous != []) "You may do these without asking: ${describe agent.authority.autonomous}.\n"
+    + lib.optionalString (agent.authority.decision != []) "These go to ${target} as decisions: ${describe agent.authority.decision}.\n";
 
   capabilitySentences = agent: ''
     File edits: ${
@@ -294,7 +339,7 @@
   in
     builtins.seq (validateAgent name agent) ''
       ${agent.description}
-      ${scopeSection agent}${knowledgeSection agent}${lib.optionalString (validatedMcp != []) ''
+      ${authoritySentences agent}${scopeSection agent}${knowledgeSection agent}${lib.optionalString (validatedMcp != []) ''
 
         ## MCP servers
 
@@ -391,6 +436,7 @@
       + scopeSentences agent
       + lib.optionalString (validatedMcp != []) "MCP servers required for this role: ${lib.concatStringsSep ", " (map (s: "`${s}`") validatedMcp)}.\n"
       + capabilitySentences agent
+      + authoritySentences agent
       + lib.optionalString (agent.cotal.escalateTo != null) "Send decisions and escalations to the peer with Cotal role `${cfg.agents.${agent.cotal.escalateTo}.cotal.role}`; find that peer on the roster by role because presence names change on restart.\n");
   renderCotal = name: agent: let
     c = agent.cotal;
