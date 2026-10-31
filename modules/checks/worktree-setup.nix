@@ -45,6 +45,11 @@
         imports = [base];
         agentic.worktree.setupHooks = lib.mkForce ["echo failing >&2; exit 9"];
       }).lib.fixture;
+    globs =
+      (fixture {
+        agentic.worktree.copyFiles = [".env.*" "config/*.local" "missing/*.local" "space dir/*.local"];
+        agentic.worktree.traits.secretDotfiles = ["secrets/*.env"];
+      }).lib.fixture;
     noProof = (fixture {workbench.worktree.teardownHooks = ["echo complete"];}).lib.fixture;
     skipped = (fixture {workbench.worktree.teardownHooks = ["echo verified: checked; echo skipped: unavailable"];}).lib.fixture;
     badExit = (fixture {workbench.worktree.teardownHooks = ["echo verified: checked; exit 4"];}).lib.fixture;
@@ -144,6 +149,23 @@
         git -C main worktree add -b fixture-one "$TMPDIR/one" main
         git -C main branch fixture-two main
         git -C main worktree add "$TMPDIR/two" fixture-two
+        # Globs expand against main, preserve nested/spaced paths, and never
+        # replace existing files. A no-match pattern is harmless.
+        mkdir -p main/config main/secrets "main/space dir" two/config
+        echo dotenv > main/.env.fixture
+        echo source > main/config/keep.local
+        echo nested > main/config/new.local
+        echo secret > main/secrets/token.env
+        echo spaced > "main/space dir/name with spaces.local"
+        echo existing > two/config/keep.local
+        ${globs.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        cmp main/.env.fixture two/.env.fixture
+        cmp main/config/new.local two/config/new.local
+        cmp main/secrets/token.env two/secrets/token.env
+        cmp "main/space dir/name with spaces.local" "two/space dir/name with spaces.local"
+        test "$(cat two/config/keep.local)" = existing
+        test ! -e two/missing
+        jq -e '.status == "ok" and .failedStep == null' "$(git -C two rev-parse --absolute-git-dir)/workbench-setup.json"
         ln -s "$TMPDIR/main/.devenv" one/.devenv
         ln -s "$TMPDIR/main/.direnv" one/.direnv
         record() { printf '%s/workbench-setup.json' "$(git -C "$1" rev-parse --absolute-git-dir)"; }

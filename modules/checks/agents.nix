@@ -194,6 +194,68 @@
         flake.agenticProbe.body = config.agentic.agentsLib.renderCotal "broken" config.agentic.agents.broken;
       }) "body";
 
+    profileFixture = inputs.flake-parts.lib.mkFlake {inherit inputs;} {
+      systems = [system];
+      imports = [
+        config.flake.flakeModules.default
+        ({config, ...}: {
+          agentic.modelProfiles.quick = {
+            claude.model = "haiku";
+            codex = {
+              model = "profile-small";
+              reasoningEffort = "low";
+            };
+            opencode.model = "fixture/profile";
+            cotal.model = "fixture/profile-mesh";
+          };
+          agentic.agents = {
+            profiled = {
+              description = "Profile defaults.";
+              profile = "quick";
+              platforms = ["claude" "codex" "opencode" "cotal"];
+              cotal.role = "worker";
+            };
+            pinned = {
+              description = "Explicit native pins.";
+              profile = "quick";
+              platforms = ["claude" "codex" "opencode" "cotal"];
+              claude.model = "sonnet";
+              codex = {
+                model = "explicit";
+                reasoningEffort = "high";
+              };
+              opencode.model = "fixture/explicit";
+              cotal = {
+                role = "worker";
+                model = "fixture/explicit-mesh";
+              };
+            };
+          };
+          flake.profileProbe = config.agentic;
+        })
+      ];
+    };
+    profiles = profileFixture.profileProbe;
+    profileRenders = name: let
+      agent = profiles.agents.${name};
+      render = profiles.agentsLib;
+    in {
+      claude = render.renderClaude name agent;
+      codex = builtins.fromTOML (render.renderCodex name agent);
+      opencode = render.renderOpencode name agent;
+      cotal = render.renderCotal name agent;
+    };
+    profiled = profileRenders "profiled";
+    pinned = profileRenders "pinned";
+    unknownProfileFails = failing ({config, ...}: {
+      agentic.modelProfiles.known.claude.model = "haiku";
+      agentic.agents.broken = {
+        description = "Unknown model profile.";
+        profile = "nonexistent";
+      };
+      flake.agenticProbe.body = config.agentic.agentsLib.renderClaude "broken" config.agentic.agents.broken;
+    }) "body";
+
     p = fixture.agenticProbe;
     relayBody = lib.last (lib.splitString "---" p.relayCotal);
 
@@ -212,6 +274,18 @@
       assert lib.hasInfix "Shell commands: permitted." relayBody;
       assert lib.hasInfix "Web access: not permitted." relayBody;
       assert lib.hasInfix "Send decisions and escalations to the peer with Cotal role `coordinator`; find that peer on the roster by role because presence names change on restart." relayBody;
+      # Profiles populate native renderer fields; explicit pins win.
+      assert lib.hasInfix ''model: "haiku"'' profiled.claude;
+      assert profiled.codex.model == "profile-small";
+      assert profiled.codex.model_reasoning_effort == "low";
+      assert lib.hasInfix ''model: "fixture/profile"'' profiled.opencode;
+      assert lib.hasInfix ''model: "fixture/profile-mesh"'' profiled.cotal;
+      assert lib.hasInfix ''model: "sonnet"'' pinned.claude;
+      assert pinned.codex.model == "explicit";
+      assert pinned.codex.model_reasoning_effort == "high";
+      assert lib.hasInfix ''model: "fixture/explicit"'' pinned.opencode;
+      assert lib.hasInfix ''model: "fixture/explicit-mesh"'' pinned.cotal;
+      assert unknownProfileFails;
       assert lib.hasInfix "role: \"relay\"" p.relayCotal;
       assert lib.hasInfix "agent: \"pi\"" p.relayCotal;
       assert !(lib.hasInfix "model:" p.relayCotal);

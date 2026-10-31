@@ -158,13 +158,23 @@
           git submodule update --init --recursive
         ''}
         step='copy-files'
-        # The declared list may contain exactly one file.
-        # shellcheck disable=SC2043
-        for f in ${lib.escapeShellArgs (cfg.copyFiles ++ cfg.traits.secretDotfiles)}; do
-          if [ ! -e "$f" ] && [ -e "$main_wt/$f" ]; then
-            cp -R "$main_wt/$f" "$f"
-          fi
-        done
+        (
+          cd -- "$main_wt"
+          shopt -s nullglob dotglob
+          # Expand patterns, but never split paths containing whitespace.
+          IFS=
+          # The declared list may contain exactly one pattern.
+          # shellcheck disable=SC2043
+          for pattern in ${lib.escapeShellArgs (cfg.copyFiles ++ cfg.traits.secretDotfiles)}; do
+            # shellcheck disable=SC2086
+            for f in $pattern; do
+              if [ -e "$f" ] && [ ! -e "$worktree/$f" ]; then
+                mkdir -p -- "$(dirname -- "$worktree/$f")"
+                cp -R -- "$f" "$worktree/$f"
+              fi
+            done
+          done
+        )
         step='state-isolation'
         for d in .direnv .devenv; do
           if [ -L "$d" ] && [ "$(readlink "$d")" = "$main_wt/$d" ]; then
@@ -249,13 +259,13 @@ in {
         type = lib.types.listOf lib.types.str;
         default = [];
         example = [".env"];
-        description = "Secret-bearing files copied per worktree, never shared.";
+        description = "Secret-bearing paths or shell glob patterns copied from the main worktree when absent, never shared. Unmatched patterns are ignored; relative paths are preserved.";
       };
     };
     copyFiles = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [".envrc" ".claude"];
-      description = "Files copied from the main worktree when absent.";
+      description = "Paths or shell glob patterns copied from the main worktree when absent. Unmatched patterns are ignored; relative paths are preserved with parent directories created.";
     };
     setupHooks = lib.mkOption {
       type = lib.types.listOf lib.types.str;

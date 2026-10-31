@@ -278,9 +278,12 @@ never changes the caller's recursion policy.
 Configure `workbench.worktree` (or `agentic.worktree`):
 
 - `traits.submodules`: recursively initialize submodules (default false).
-- `traits.secretDotfiles`: files copied, never shared (default empty).
-- `copyFiles`: copy absent files from the main checkout (default
-  `[".envrc" ".claude"]`).
+- `traits.secretDotfiles`: paths or shell globs copied, never shared (default empty).
+- `copyFiles`: paths or shell globs copied when absent from the new worktree
+  (default `[".envrc" ".claude"]`). Both lists expand against the main checkout,
+  for example `[".env.*" "config/*.local"]`. Matching files retain their relative
+  paths, with parent directories created as needed; existing destinations are
+  skipped and patterns with no match are ignored.
 - `setupHooks` and `teardownHooks`: ordered lists of shell command strings.
   Each runs in a separate strict Bash process with the worktree as cwd; changes
   to environment or cwd do not carry into the next hook. Reference packages
@@ -333,6 +336,29 @@ MCP requirements. Native model settings are optional: `claude.model` and
 `claude.maxTurns`, `codex.model`, `codex.reasoningEffort`, and
 `opencode.model`. Unset fields preserve harness defaults;
 model/provider availability and authentication remain the operator's concern.
+
+Use `agentic.modelProfiles.<name>` for reusable native model defaults and set
+`agentic.agents.<name>.profile = "<name>";` to select one. Profiles accept
+`claude.model`, `codex.model`, `codex.reasoningEffort`, `opencode.model`, and
+`cotal.model`; each defaults to null. Non-null fields populate the existing
+agent settings at `mkDefault` priority, so explicit per-agent pins win. Unknown
+profile names fail evaluation with the agent name and defined profiles.
+Agents without a profile are unchanged. This does not configure Cotal's runtime
+`modelPolicy`.
+
+```nix
+agentic.modelProfiles.quick = {
+  claude.model = "haiku";
+  codex = { model = "fixture-small"; reasoningEffort = "low"; };
+  opencode.model = "provider/small";
+  cotal.model = "provider/small";
+};
+agentic.agents.reviewer.profile = "quick";
+agentic.agents.builder = {
+  profile = "quick";
+  claude.model = "sonnet"; # Explicit pin overrides the profile.
+};
+```
 
 The project bootstrap places Claude and OpenCode Markdown agents and Codex
 standalone TOML agents. `nix run .#write-agent-roles` refreshes those directories
