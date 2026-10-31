@@ -368,7 +368,7 @@ Configure `workbench.worktree` (or `agentic.worktree`):
   line. Hooks must verify actual resource absence, not merely command dispatch.
   A failure stops the runner; no declared teardown hooks succeeds with a note.
 
-`agentic.worktreeLib.{setupScript,hooksScript,teardownScript} pkgs` exposes the
+`agentic.worktreeLib.{setupScript,hooksScript,teardownScript,workerStartScript} pkgs` exposes the
 same runners and the Git-hook isolation helper. These are the supported APIs;
 legacy creator-specific traits and copy options warn and redirect to them.
 Legacy generation-only settings are ignored with warnings; delete them on a pin

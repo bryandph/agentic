@@ -30,6 +30,7 @@ from pathlib import Path
 root = Path(os.environ["FIXTURE"])
 (root / "argv").write_text(json.dumps(sys.argv[1:]))
 if os.environ["CASE"] == "exit":
+    print("\\n".join("old line " + str(i) for i in range(60)))
     print("\\x1b[31mOption '--prompt' argument is ambiguous\\x1b[0m", file=sys.stderr)
     sys.exit(2)
 ''')
@@ -45,13 +46,16 @@ if launched and case in ("started", "blocked", "trust-idle"):
     info.update(agent="pi", agent_status={"started":"working", "blocked":"blocked", "trust-idle":"idle"}[case],
                 agent_session={"value":"native-session.jsonl"})
 if a[:2] == ["pane", "run"]:
+    if case == "run-rejected": sys.exit(1)
     assert not a[3].startswith("exec ")
     (root / "launched").touch()
     result = subprocess.run(a[3], shell=True, capture_output=True, text=True)
     (root / "tail").write_text(result.stdout + result.stderr)
     print(json.dumps({"result": {}}))
 elif a[:2] == ["pane", "get"]:
-    if case == "vanished" and launched: sys.exit(1)
+    if case == "pane-missing" or (case == "vanished" and launched): sys.exit(1)
+    if case == "wrong-cwd": info["cwd"] = "/wrong"
+    if case == "occupied": info["agent"] = "pi"
     print(json.dumps({"result":{"pane":info}}))
 elif a[:2] == ["agent", "get"]:
     print(json.dumps({"result":{"agent":info}}))
@@ -59,7 +63,7 @@ elif a[:2] == ["pane", "read"]:
     print((root / "tail").read_text() if (root / "tail").exists() else "")
 elif a[:2] == ["pane", "process-info"]:
     print(json.dumps({"result":{"process_info":{"shell_pid":1,
-      "foreground_processes":[{"pid":1 if not launched or case == "exit" else 2}]}}}))
+      "foreground_processes":[{"pid":1 if (not launched and case != "busy-shell") or case == "exit" else 2}]}}}))
 elif a[:2] == ["agent", "wait"]:
     assert a[3:7] == ["--until", "working", "--until", "blocked"]
     sys.exit(1)
@@ -73,6 +77,11 @@ else: raise AssertionError(a)
     for case, status, code in [("setup-missing", "setup-failed", 30),
                                 ("setup-failed", "setup-failed", 30),
                                 ("prompt-missing", "launch-failed", 20),
+                                ("pane-missing", "launch-failed", 20),
+                                ("wrong-cwd", "launch-failed", 20),
+                                ("occupied", "launch-failed", 20),
+                                ("busy-shell", "launch-failed", 20),
+                                ("run-rejected", "launch-failed", 20),
                                 ("exit", "launch-failed", 20),
                                 ("blocked", "blocked", 10),
                                 ("started", "started", 0),
@@ -90,7 +99,7 @@ else: raise AssertionError(a)
         assert record["status"] == status, (case, record)
         assert len(record["evidence"].splitlines()) <= 40
         assert "\x1b" not in record["evidence"]
-        if case.startswith("setup-") or case == "prompt-missing":
+        if case.startswith("setup-") or case in ("prompt-missing", "pane-missing", "wrong-cwd", "occupied", "busy-shell", "run-rejected"):
             assert not (root / "launched").exists()
         else:
             calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
@@ -108,3 +117,13 @@ else: raise AssertionError(a)
         if case == "timeout":
             assert "timeout" in record["reason"]
         print(case, "ok")
+
+    # An unavailable setup command must also yield one structured record.
+    (bindir / "workbench-worktree-setup").unlink()
+    result = subprocess.run([sys.argv[1], "--pane", "w:p", "--worktree", str(root),
+                             "--", "launcher"], env=env, capture_output=True, text=True)
+    assert result.returncode == 30, result
+    record = json.loads(result.stdout)
+    assert record["status"] == "setup-failed"
+    assert "No such file" in record["diagnostics"]
+    print("setup-command-unavailable ok")
