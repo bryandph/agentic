@@ -13,9 +13,9 @@
 #   * Claude Code subagent markdown — `tools:` frontmatter derived from
 #     capabilities + mcp + claude.extraTools.
 #   * Cotal persona markdown (`.cotal/agents/<name>.md`) — mesh identity
-#     in the frontmatter (role, channel ACLs, connector pin), the shared
-#     body as the persona. Opt-in per agent through `platforms`, because
-#     a mesh persona is rarely also a harness subagent.
+#     in the frontmatter (role, channel ACLs, connector pin, capability
+#     tags). The body starts with bare fragments, then plain scope, MCP,
+#     capability and escalation sentences. Opt-in through `platforms`.
 #   * OpenCode subagent markdown — V1-SUBSET DECISION (recorded per
 #     design D5): we emit the stable V1 frontmatter (`permission:` key,
 #     files under `.opencode/agents/`) because the fleet's pinned
@@ -59,7 +59,7 @@
         delegateTo = lib.mkOption {
           type = lib.types.listOf lib.types.str;
           default = [];
-          description = "Agent names to hand off to when a task crosses out of scope.";
+          description = "Keys of agentic.agents to hand off to when a task crosses out of scope; unknown names fail rendering on every platform.";
         };
       };
 
@@ -161,7 +161,12 @@
         tags = lib.mkOption {
           type = lib.types.listOf lib.types.str;
           default = [];
-          description = "Capability tags on the presence card.";
+          description = "Presence-card tags, combined with enabled edit/exec/web capabilities and deduplicated; not Cotal control-plane grants.";
+        };
+        escalateTo = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Agentic agent key for decisions and escalations. The target must list cotal and set cotal.role; the body directs roster lookup by that role, since presence names change on restart.";
         };
         subscribe = lib.mkOption {
           type = lib.types.listOf lib.types.str;
@@ -186,12 +191,50 @@
 
   # --- compiled body (shared across platforms) ---------------------
 
+  validateAgent = name: agent:
+    assert lib.all (target:
+      lib.assertMsg (builtins.hasAttr target cfg.agents)
+      "agentic.agents.${name}: scope.delegateTo names unknown agent '${target}'")
+    agent.scope.delegateTo;
+    assert lib.assertMsg (agent.cotal.escalateTo == null || builtins.hasAttr agent.cotal.escalateTo cfg.agents)
+    "agentic.agents.${name}: cotal.escalateTo names unknown agent '${toString agent.cotal.escalateTo}'";
+    assert lib.assertMsg (agent.cotal.escalateTo
+      == null
+      || (let
+        target = cfg.agents.${agent.cotal.escalateTo};
+      in
+        lib.elem "cotal" target.platforms && target.cotal.role != null))
+    "agentic.agents.${name}: cotal.escalateTo target '${toString agent.cotal.escalateTo}' must list cotal and set cotal.role"; agent;
+
+  scopeSentences = agent:
+    lib.optionalString (agent.scope.paths != []) "Operate only within: ${lib.concatStringsSep ", " (map (p: "`${p}`") agent.scope.paths)}.\n"
+    + lib.optionalString (agent.scope.forbidden != []) "Never read, modify, or act on: ${lib.concatStringsSep ", " (map (p: "`${p}`") agent.scope.forbidden)}.\n"
+    + lib.optionalString (agent.scope.delegateTo != []) "If a task crosses out of this scope, hand off to: ${lib.concatStringsSep ", " agent.scope.delegateTo}.\n";
+
+  capabilitySentences = agent: ''
+    File edits: ${
+      if agent.capabilities.edit
+      then "permitted"
+      else "not permitted"
+    }.
+    Shell commands: ${
+      if agent.capabilities.exec
+      then "permitted"
+      else "not permitted"
+    }.
+    Web access: ${
+      if agent.capabilities.web
+      then "permitted"
+      else "not permitted"
+    }.
+  '';
+
   scopeSection = agent:
     lib.optionalString (agent.scope.paths != [] || agent.scope.forbidden != [] || agent.scope.delegateTo != []) ''
 
       ## Scope
 
-      ${lib.optionalString (agent.scope.paths != []) "Operate only within: ${lib.concatStringsSep ", " (map (p: "`${p}`") agent.scope.paths)}.\n"}${lib.optionalString (agent.scope.forbidden != []) "Never read, modify, or act on: ${lib.concatStringsSep ", " (map (p: "`${p}`") agent.scope.forbidden)}.\n"}${lib.optionalString (agent.scope.delegateTo != []) "If a task crosses out of this scope, hand off to: ${lib.concatStringsSep ", " agent.scope.delegateTo}.\n"}'';
+      ${scopeSentences agent}'';
 
   knowledgeSection = agent:
     lib.optionalString (agent.fragments != []) (
@@ -208,14 +251,15 @@
 
   compileBody = name: agent: let
     validatedMcp = cfg.mcp.lib.validateAgentRefs name agent.mcp;
-  in ''
-    ${agent.description}
-    ${scopeSection agent}${knowledgeSection agent}${lib.optionalString (validatedMcp != []) ''
+  in
+    builtins.seq (validateAgent name agent) ''
+      ${agent.description}
+      ${scopeSection agent}${knowledgeSection agent}${lib.optionalString (validatedMcp != []) ''
 
-      ## MCP servers
+        ## MCP servers
 
-      Required for this role: ${lib.concatStringsSep ", " (map (s: "`${s}`") validatedMcp)}.
-    ''}'';
+        Required for this role: ${lib.concatStringsSep ", " (map (s: "`${s}`") validatedMcp)}.
+      ''}'';
 
   # --- platform grant derivation ------------------------------------
 
@@ -286,22 +330,7 @@
 
     ## Capabilities
 
-    File edits: ${
-      if agent.capabilities.edit
-      then "permitted"
-      else "not permitted"
-    }.
-    Shell commands: ${
-      if agent.capabilities.exec
-      then "permitted"
-      else "not permitted"
-    }.
-    Web access: ${
-      if agent.capabilities.web
-      then "permitted"
-      else "not permitted"
-    }.
-
+    ${capabilitySentences agent}
     For required MCP servers, use `mcp` search, describe, then call the
     discovered tool. Activate Serena for the current project before other
     Serena calls. Do not infer authorization from a tool being available.
@@ -312,10 +341,17 @@
   # Cotal reads the frontmatter as YAML; JSON scalars and lists are valid
   # YAML, so every operator-supplied string goes through toJSON. `name`
   # is also the file name the launcher resolves, so they must agree. The
-  # body is appended to the agent's system prompt, so it is the bare
-  # fragment text: no description line and no section headers.
-  cotalBody = agent:
-    lib.concatStringsSep "\n" (map (fname: (cfg.knowledgeLib.fragment fname).text) agent.fragments);
+  # body is appended to the agent's system prompt: fragments first,
+  # then plain instructions, with no description line or section headers.
+  cotalBody = name: agent: let
+    validatedMcp = cfg.mcp.lib.validateAgentRefs name agent.mcp;
+  in
+    builtins.seq (validateAgent name agent) (lib.concatStringsSep "\n" (map (fname: (cfg.knowledgeLib.fragment fname).text) agent.fragments)
+      + "\n"
+      + scopeSentences agent
+      + lib.optionalString (validatedMcp != []) "MCP servers required for this role: ${lib.concatStringsSep ", " (map (s: "`${s}`") validatedMcp)}.\n"
+      + capabilitySentences agent
+      + lib.optionalString (agent.cotal.escalateTo != null) "Send decisions and escalations to the peer with Cotal role `${cfg.agents.${agent.cotal.escalateTo}.cotal.role}`; find that peer on the roster by role because presence names change on restart.\n");
   renderCotal = name: agent: let
     c = agent.cotal;
   in
@@ -325,13 +361,13 @@
       name: ${name}
       role: ${builtins.toJSON c.role}
       description: ${builtins.toJSON agent.description}
-      tags: ${builtins.toJSON c.tags}
+      tags: ${builtins.toJSON (lib.unique (c.tags ++ builtins.filter (cap: agent.capabilities.${cap}) ["edit" "exec" "web"]))}
       ${lib.optionalString (c.agent != null) "agent: ${builtins.toJSON c.agent}\n"}${lib.optionalString (c.model != null) "model: ${builtins.toJSON c.model}\n"}subscribe: ${builtins.toJSON c.subscribe}
       allowSubscribe: ${builtins.toJSON c.allowSubscribe}
       allowPublish: ${builtins.toJSON c.allowPublish}
       ---
 
-      ${cotalBody agent}'';
+      ${cotalBody name agent}'';
 
   cotalAgentsDir = pkgs:
     pkgs.linkFarm "cotal-personas" (
