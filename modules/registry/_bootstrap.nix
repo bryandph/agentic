@@ -95,37 +95,30 @@ in {
   options.agentic.devenvLib = lib.mkOption {
     type = lib.types.raw;
     readOnly = true;
-    description = "Bootstrap building blocks: `bootstrapScript pkgs`, `projectConfigFor pkgs flavor`, `managedMcpConfig pkgs`, `packages pkgs`, and `shellModule` (the devenv module body both transports wire).";
+    description = "Bootstrap building blocks: `bootstrapScript pkgs`, `projectConfigFor pkgs flavor`, `managedMcpConfig pkgs`, `packages pkgs`, `gitHooksModule` (standalone hook lifecycle), and `shellModule` (the devenv module body both transports wire).";
   };
 
   config.agentic.devenvLib = {
     inherit bootstrapScript managedMcpConfig projectConfigFor;
-    # Workflow CLIs the shell should carry: knowledge search (the CLI
+    gitHooksModule = import ../_git-hooks/devenv.nix;
+    # Workflow CLIs the shell should carry: worktree setup/teardown and hook
+    # diagnostics; knowledge search (the CLI
     # equivalent Pi relies on), when the consumer declares collections,
     # and `backlog` when work tracking is enabled.
     packages = pkgs:
-      [(acfg.worktreeLib.setupScript pkgs) (acfg.worktreeLib.teardownScript pkgs)]
+      [(acfg.worktreeLib.setupScript pkgs) (acfg.worktreeLib.teardownScript pkgs) (import ../_git-hooks/package.nix pkgs)]
       ++ lib.optional (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.wrapper pkgs)
       ++ lib.optional (acfg.workTracking.prefix != null && acfg.workTracking.lib.package pkgs != null) (acfg.workTracking.lib.package pkgs);
 
     # The devenv module body — identical under both transports.
-    shellModule = {
-      pkgs,
-      config,
-      ...
-    }: {
-      imports = [(builtins.toPath "${agenticInputs.mcpServersSrc}/modules/devenv.nix")];
+    shellModule = {pkgs, ...}: {
+      imports = [
+        (builtins.toPath "${agenticInputs.mcpServersSrc}/modules/devenv.nix")
+        acfg.devenvLib.gitHooksModule
+      ];
       mcp-servers = managedMcpConfig pkgs;
       packages = acfg.devenvLib.packages pkgs;
       enterShell = bootstrapScript pkgs;
-      # devenv installs hooks into `git rev-parse --git-path hooks` with an
-      # absolute config path. Point each linked worktree at its own hooks
-      # dir first, whoever created it, so one worktree's install never
-      # replaces (or, once removed, breaks) another checkout's hook.
-      tasks."agentic:worktree-hooks" = lib.mkIf (config.git-hooks.enable or false) {
-        exec = "${acfg.worktreeLib.hooksScript pkgs}/bin/agentic-worktree-hooks";
-        before = ["devenv:git-hooks:install"];
-      };
       # One worktree setup path for ALL creators (agentic-devenv spec):
       # Claude Code's native worktrees run the SAME script the generated
       # .workmux.yaml post_create runs. Wired through devenv's
