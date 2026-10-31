@@ -32,8 +32,48 @@
 }: let
   cfg = config.agentic;
 
-  agentType = lib.types.submodule {
+  reasoningEffortType = lib.types.nullOr (lib.types.enum ["minimal" "low" "medium" "high" "xhigh" "max" "ultra"]);
+  profileType = lib.types.submodule {
+    options = let
+      model = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Default native model pin for agents selecting this profile.";
+      };
+    in {
+      claude.model = model;
+      codex = {
+        inherit model;
+        reasoningEffort = lib.mkOption {
+          type = reasoningEffortType;
+          default = null;
+          description = "Default native Codex reasoning effort for this profile.";
+        };
+      };
+      opencode.model = model;
+      cotal.model = model;
+    };
+  };
+
+  agentType = lib.types.submodule ({
+    config,
+    name,
+    ...
+  }: {
+    config = lib.mkIf (config.profile != null) (
+      let
+        profile = cfg.modelProfiles.${config.profile} or (throw "agentic.agents.${name}: unknown model profile '${config.profile}'; defined profiles: ${lib.concatStringsSep ", " (lib.attrNames cfg.modelProfiles)}");
+      in
+        lib.genAttrs ["claude" "codex" "opencode" "cotal"] (platform:
+          lib.genAttrs (["model"] ++ lib.optional (platform == "codex") "reasoningEffort") (field:
+            lib.mkIf (profile.${platform}.${field} != null) (lib.mkDefault profile.${platform}.${field})))
+    );
     options = {
+      profile = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Name from agentic.modelProfiles whose non-null native settings apply at mkDefault priority; explicit agent pins win.";
+      };
       description = lib.mkOption {
         type = lib.types.str;
         description = "One-line agent description (drives delegation).";
@@ -112,7 +152,7 @@
           description = "Codex model ID; null preserves harness model selection.";
         };
         reasoningEffort = lib.mkOption {
-          type = lib.types.nullOr (lib.types.enum ["minimal" "low" "medium" "high" "xhigh" "max" "ultra"]);
+          type = reasoningEffortType;
           default = null;
           description = "Native reasoning effort; choose a value supported by the selected model.";
         };
@@ -185,7 +225,7 @@
         };
       };
     };
-  };
+  });
 
   forPlatform = platform: lib.filterAttrs (_: agent: lib.elem platform agent.platforms) cfg.agents;
 
@@ -443,6 +483,12 @@
   '';
 in {
   options.agentic = {
+    modelProfiles = lib.mkOption {
+      type = lib.types.attrsOf profileType;
+      default = {};
+      description = "Named native model defaults selected with agentic.agents.<name>.profile; null fields leave harness defaults intact.";
+    };
+
     agents = lib.mkOption {
       type = lib.types.attrsOf agentType;
       default = {};
