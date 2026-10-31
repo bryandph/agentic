@@ -111,6 +111,7 @@ in {
       imports = [
         (builtins.toPath "${agenticInputs.mcpServersSrc}/modules/devenv.nix")
         acfg.devenvLib.gitHooksModule
+        acfg.secretScanning.lib.devenvModule
       ];
       mcp-servers = managedMcpConfig pkgs;
       packages = acfg.devenvLib.packages pkgs;
