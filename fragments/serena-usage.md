@@ -10,16 +10,18 @@ Serena is the project's **memory holder** — plain markdown under
   After activation, discover/list the memory and symbolic tools through
   `mcp({server: "serena"})`. If metadata is absent, first connect with
   `mcp({connect: "serena"})`; connection is not a Serena tool call.
-- Write durable findings (decisions + rationale, gotchas, bring-up
-  research) via `write_memory`. Store **pointers, not snapshots**: "run
-  X / see file Y" survives; copied values drift into lies. Ask: "will
-  this be false in 3 months?" — if yes, point at the source of truth.
+- Write what cannot be derived: decisions + rationale, gotchas, findings
+  with evidence. Store **pointers, not snapshots** via `write_memory`:
+  link `mem:` refs, file paths or AGENTS.md sections. Never snapshot
+  AGENTS.md, command lists, generated knowledge or repo overviews into
+  memories — those copies drift; point to the source instead.
 - TODOs belong in the issue tracker, active designs in the spec system,
   session narratives nowhere — a memory is for what a stranger needs a
   year from now.
 - The `knowledge/` namespace is **generated and read-only** (rendered
   from the declared fragment registry) — never write there; your
-  writable namespaces are everything else. Cross-reference memories
+  writable namespaces are other subdirectories. Move root memories with
+  `rename_memory` so `mem:` references stay valid. Cross-reference memories
   with `mem:`-prefixed links; `serena memories check` gates reference
   integrity in CI.
 - Retrieval: names/grep first; use a knowledge-search tool, when the

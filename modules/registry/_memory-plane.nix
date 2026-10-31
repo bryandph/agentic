@@ -70,6 +70,21 @@ in {
       '';
     };
 
+    namespaces = {
+      require = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Reject root-level Serena memories unless explicitly allowlisted; namespaced memories are always allowed.";
+      };
+
+      allowRoot = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        example = ["legacy-finding"];
+        description = "Root memory names (without .md) allowed when namespaces.require is true.";
+      };
+    };
+
     projectName = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -105,14 +120,49 @@ in {
       description = ''
         `memoriesDir pkgs` (the generated namespace content),
         `projectYml pkgs`, `placeScript pkgs` (idempotent shell
-        placement), `checkCommand pkgs` (serena memories check argv
-        for CI).
+        placement), `checkScript pkgs` (reference integrity gate),
+        `namespaceCheckScript pkgs` (opt-in root memory namespace gate),
+        `namespaceCheckPackage pkgs` (standalone CLI for the same gate).
+        Check scripts run from the repository root.
       '';
     };
   };
 
   config.agentic.memoryPlane.lib = {
     inherit memoriesDir projectYml placeScript;
+    namespaceCheckPackage = pkgs:
+      pkgs.writeShellScriptBin "serena-memory-namespaces" ''
+        set -euo pipefail
+        ${cfg.lib.namespaceCheckScript pkgs}
+      '';
+    namespaceCheckScript = pkgs:
+      if !cfg.namespaces.require
+      then ":"
+      else ''
+        (
+          shopt -s nullglob dotglob
+          status=0
+          for memory in .serena/memories/*.md; do
+            [ -f "$memory" ] || continue
+            name="''${memory##*/}"
+            name="''${name%.md}"
+            allowed=0
+            for allowed_name in ${lib.escapeShellArgs cfg.namespaces.allowRoot}; do
+              if [ "$name" = "$allowed_name" ]; then
+                allowed=1
+                break
+              fi
+            done
+            [ "$allowed" = 0 ] || continue
+            printf 'Un-namespaced Serena memory: %s\n' "$memory"
+            status=1
+          done
+          if [ "$status" != 0 ]; then
+            echo 'Fix: move into a namespace with serena rename_memory so mem: references stay valid.'
+            exit 1
+          fi
+        )
+      '';
     # `serena memories check` always exits 0 by design — CI must gate
     # on the report text instead. This script fails on any finding.
     #

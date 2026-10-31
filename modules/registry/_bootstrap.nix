@@ -103,6 +103,7 @@ in {
     # and `backlog` when work tracking is enabled.
     packages = pkgs:
       [(acfg.worktreeLib.setupScript pkgs) (acfg.worktreeLib.teardownScript pkgs) (acfg.worktreeLib.workerStartScript pkgs) (acfg.worktreeLib.removeScript pkgs) (import ../_git-hooks/package.nix pkgs)]
+      ++ lib.optional acfg.memoryPlane.namespaces.require (acfg.memoryPlane.lib.namespaceCheckPackage pkgs)
       ++ lib.optional (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.wrapper pkgs)
       ++ lib.optional (acfg.workTracking.prefix != null && acfg.workTracking.lib.package pkgs != null) (acfg.workTracking.lib.package pkgs);
 
