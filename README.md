@@ -416,6 +416,32 @@ grant trust, prove mesh acceptance, replace native harness status or authorize
 cleanup. Repository owners retain their safety flags and external-resource
 lifecycle policy.
 
+### Serena memory namespaces
+
+Serena's `knowledge/` memories remain generated and read-only. Agent-written
+memories belong in other topic subdirectories. To enforce that convention in a
+consumer importing core's flake-parts module:
+
+```nix
+agentic.memoryPlane.namespaces = {
+  require = true; # default false: existing root memories remain allowed
+  allowRoot = [ "legacy-finding" ]; # default []; names without .md
+};
+```
+
+This adds `checks.<system>.serena-memory-namespaces`, scanning the committed
+source at `agentic.instructions.selfPath` (default: the consumer's `inputs.self`).
+It lists every non-allowlisted `.serena/memories/*.md` directly at the root and
+fails. Subdirectory memories, including the generated namespace, are unaffected.
+Move a memory with Serena's `rename_memory` so `mem:` references stay valid;
+this check never moves or deletes anything.
+
+With the same opt-in, both flake-backed and devenv-native shells receive the
+`serena-memory-namespaces` CLI via `devenvLib.packages`. Run it from the repo
+root to check the live checkout; native consumers have no flake check.
+`agentic.memoryPlane.lib.namespaceCheckScript pkgs` exposes the same gate for
+other CI wiring.
+
 ### Skills
 
 Core renders canonical bodies to `.claude/skills/<name>/SKILL.md` and discovery

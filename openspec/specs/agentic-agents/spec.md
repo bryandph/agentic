@@ -34,6 +34,11 @@ writable namespace and are never touched by generation. The serena
 project configuration (`.serena/project.yml` — languages, read-only and
 ignored memory patterns) SHALL be generated from module options. Memory
 reference integrity (`serena memories check`) SHALL run in repo CI.
+Consumers MAY enable a namespace policy (default off) that SHALL reject
+root-level Markdown memories except allowlisted names, without changing
+namespaced memories or generated content. Flake consumers SHALL receive a
+check and enabled shells SHALL receive an equivalent CLI. Core Serena
+memory guidance SHALL teach pointers to sources, not drifting snapshots.
 Retrieval SHALL be available beyond name-based listing: a semantic search
 tool over the committed markdown, whose index is disposable and lives
 outside the repo, exposed via MCP AND as a plain CLI (harnesses without
@@ -50,6 +55,35 @@ core MCP support, e.g. Pi, retain access).
   knowledge generation re-runs
 - **THEN** the agent-written memories are unchanged and only the
   generated namespace is updated
+
+#### Scenario: namespace policy is opt-in
+- **WHEN** a consumer leaves `agentic.memoryPlane.namespaces.require` false
+- **THEN** root-level agent memories remain allowed and no namespace flake
+  check is added
+
+#### Scenario: un-namespaced memories fail the enabled policy
+- **WHEN** the namespace policy is enabled and root `.serena/memories/*.md`
+  memories are not named in `agentic.memoryPlane.namespaces.allowRoot`
+- **THEN** `checks.<system>.serena-memory-namespaces` fails, lists every
+  offending memory and directs agents to move it with Serena `rename_memory`
+  to preserve `mem:` references; the check never modifies memories
+
+#### Scenario: allowlisted and namespaced memories pass
+- **WHEN** every root memory is allowlisted by name without `.md`, or all
+  memories live in subdirectories
+- **THEN** the enabled namespace check passes, including for the unchanged
+  generated read-only namespace
+
+#### Scenario: native consumers can enforce namespaces
+- **WHEN** a devenv-native consumer enables the namespace policy
+- **THEN** its shell supplies the `serena-memory-namespaces` CLI for the same
+  check from the repository root without requiring flake-parts
+
+#### Scenario: memory guidance avoids snapshots
+- **WHEN** an agent reads the core Serena usage fragment
+- **THEN** it is told to record non-derivable decisions, gotchas and findings
+  with evidence, pointing to sources rather than snapshotting AGENTS.md,
+  command lists, generated knowledge or repository overviews
 
 #### Scenario: semantic search reaches every harness
 - **WHEN** an agent needs a concept-level query over the repo's knowledge
