@@ -31,6 +31,71 @@ Hard rules:
   core can see (e.g. memories core itself ships) — never a consuming repo's
   artifacts.
 
+## Secret scanning (opt-in)
+
+Betterleaks is the single scanner for the staged hook, deterministic source-tree
+check and explicit history audit. The package comes from the consumer's `pkgs`
+(and therefore its nixpkgs pin); this implementation is qualified with 1.3.1.
+No organization policy or automatic adoption is built in.
+
+For a flake-parts consumer already importing `agentic.flakeModules.default`:
+
+```nix
+agentic.secretScanning.enable = true;
+# Optional repo-relative, committed exception files:
+# agentic.secretScanning.baseline = ".secret-baseline.json";
+# agentic.secretScanning.ignoreFile = ".betterleaksignore";
+```
+
+Import the resulting consumer `config.flake.modules.devenv.agentic` into the
+devenv shell as usual. Its shellModule composes the existing `git-hooks` lifecycle
+module and adds a generated prek hook (no handwritten pre-commit YAML). The
+same option works in the devenv-native transport. That transport has no flake
+outputs: use `agentic.secretScanning.lib.check pkgs source` for a CI derivation
+when building a separate flake. Flake-parts consumers automatically receive
+`packages.<system>.agentic-secret-scan` and `checks.<system>.secret-scanning`.
+The check scans the consumer's flake source, not Agentic's source.
+
+```sh
+agentic-secret-scan --mode staged    # index diff only; the commit-time hook
+agentic-secret-scan --mode worktree  # current tracked file contents, not history
+agentic-secret-scan --mode history  # deliberate read-only audit of all local refs
+nix build .#checks.aarch64-darwin.secret-scanning  # deterministic CI/source scan
+```
+
+The CLI also accepts `--source DIR` and `--report FILE`. Without `.git`, worktree
+mode scans the source tree; with Git it snapshots tracked regular files only,
+including their unstaged contents. Untracked files are intentionally excluded;
+stage new files before scanning them. Symlinks, Git metadata and gitlinks are
+never traversed; source trees honor `.gitmodules` paths and nested `.git`
+markers. Each submodule must opt in and scan independently in its owning repo.
+History is never run by the hook or sandbox check. Exit codes are 0 (clean),
+1 (unbaselined findings), and 2 (scan/configuration failure).
+
+All modes force `--redact=100`, discard raw scanner stdout/stderr, and project
+JSON to **RuleID, File, StartLine, Fingerprint only** before emitting it to stdout
+or the report file. Raw scanner diagnostics and reports are never published.
+Do not bypass this boundary by calling Betterleaks directly for CI reports.
+
+Environment modules can merge or override `agentic.secretScanning.config`
+(TOML attributes; default `{ extend.useDefault = true; }`), for example adding
+narrow generic `allowlists`. Repositories should supply only justified local
+exceptions, not copy the shared rules. `--config`, `--baseline`, and
+`--ignore-file` offer explicit one-off CLI overrides; implicit scanner config
+and ignore discovery is disabled. Baseline paths and ignore paths are relative
+to `--source` and must exist when configured.
+
+For a known historical finding, review whether it was a real credential and
+rotate/revoke it first. Commit a sanitized `--report` as the baseline only after
+review, with an issue/reason in the change description. Baselines match exact
+fingerprints; source/staged/history fingerprints may differ, so audit each
+intended mode. Never commit raw Betterleaks reports. A fingerprint ignore file
+is an alternative for individually justified findings. For an intentional
+placeholder on a specific line, use `betterleaks:allow` with a reason next to
+it; prefer this narrowly scoped inline allowlist to disabling a whole rule.
+Encrypted stores are not blanket-excluded: the same policy detects accidental
+plaintext while leaving organization-specific exceptions to the environment.
+
 ## Workspace
 
 A workspace is one tree of independently versioned repositories under a
