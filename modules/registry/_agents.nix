@@ -408,7 +408,8 @@
     ---
 
     Adopt the `${name}` specialist role for this task. This is a prompt
-    in the current Pi session; workmux owns separate worker orchestration.
+    in the current Pi session; the coordinator starts separate workers in Herdr
+    worktrees (`herdr worktree create`).
     Scope and capability limits below are instructions, not a sandbox.
 
     ${compileBody name agent}

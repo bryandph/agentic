@@ -43,7 +43,7 @@
         inputs.agentic.flakeModules.default
       ];
 
-      # Repo-level agentic config: declare workmux traits, knowledge
+      # Repo-level agentic config: declare worktree traits, knowledge
       # fragments, agents, and instruction scopes here (see the agentic
       # README).
       agentic.memoryPlane.projectName = "CHANGE-ME";

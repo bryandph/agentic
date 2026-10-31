@@ -8,6 +8,14 @@
 - [x] 1.6 Add MODIFIED and REMOVED deltas for `agentic-devenv` and MODIFIED deltas for `agentic-project-template`. Confirm that durable `agentic-agents` has no Workmux artifact promise and needs no delta.
 - [x] 1.7 Run the documentation gates in section 5 and hand the amended commit to the coordinator. Stage-0 decisions do not approve runtime implementation or final removal.
 
+## Agentic-only waiver
+
+On **2026-10-31**, **Bryan**, relayed by the operator seat, approved agentic-only retirement because **"mesh is Pi-only"**. This waives the qualification matrix (tasks 3.x) and the separate final retirement approval (4.6) for agentic only. It supersedes the earlier all-harness gate only within agentic. Removals in nixspace, home and finance remain requests to their owners; no package uninstall, profile removal or cross-repository change is authorized.
+
+Tasks 3.1–3.10 and 4.6 remain unchecked as waived, not executed. Tasks 4.1 and 4.2 are completed by this branch. Durable spec sync and archival remain with the coordinator (5.4).
+
+Agentic verification on 2026-10-31 passed: `nix fmt -- --fail-on-change`, `git diff --check`, `nix develop -c openspec validate --all --strict`, and `nix flake check` (local system only). Targeted aarch64-darwin builds passed for `worktree-hooks`, `worktree-setup-script`, `worktree-setup`, `agents-registry`, `agents-authority`, `public-surface` and `org-neutral`. The old `workmux-worktree-hooks` check is now `worktree-hooks`; the setup assertions from `workmux` are now `worktree-setup-script`. Only generation-specific assertions were dropped. A fixture defining legacy `agentic.workmux.traits.submodules = true` and `agentic.workmux.copyFiles` evaluated to the equivalent canonical values and printed rename warnings. Generation-only options and any definitions of the retired helper namespace are ignored with warnings. `nix develop -c workbench-worktree-setup --worktree <checkout>` exited zero for this branch's checkout and wrote a worktree-local result with `status: ok`, `failedStep: null` and successful warm-up. The contributor shell carries both setup and teardown from agentic's own registry configuration.
+
 ## 2. Proposed additive implementation
 
 These tasks need implementation review and approval. They do not authorize
@@ -39,8 +47,8 @@ path does not qualify another harness. Final retirement has no non-Pi exception.
 
 ## 4. Proposed consumer migration and final retirement
 
-- [ ] 4.1 In agentic, migrate every source-index path in design.md. Update setup exports, options, bootstrap, generated role guidance, registry entries, docs, templates and ignores. Preserve both transports and one writer per artifact.
-- [ ] 4.2 Preserve the semantics tested by `workmux`, `workmux-worktree-hooks`, `public-surface`, `agents`, `org-neutral` and affected template/bootstrap checks. Give replacement checks suitable names. Do not delete coverage just because its name contains Workmux.
+- [x] 4.1 In agentic, migrate every source-index path in design.md. Update setup exports, options, bootstrap, generated role guidance, registry entries, docs, templates and ignores. Preserve both transports and one writer per artifact.
+- [x] 4.2 Preserve the semantics tested by `workmux`, `workmux-worktree-hooks`, `public-surface`, `agents`, `org-neutral` and affected template/bootstrap checks. Give replacement checks suitable names. Do not delete coverage just because its name contains Workmux.
 - [ ] 4.3 Request coordinated changes from the infrastructure repository and Home Manager owners. Migrate launch profiles, all harness status resources, shared-workflows guidance, skills, registry entries and tests. Preserve native prompt visibility, sounds, telemetry and unrelated MCP behavior. Remove every Workmux dependency at the shared gate.
 - [ ] 4.4 Request qualification from finance, portfolio-balancer and nixos-boards owners before they retire their setup and cleanup hooks. The workspace instance owner verifies the resolved declaration, placement and approved warning-only trust projection. These are proposals for the named owners, not edits authorized in agentic.
 - [ ] 4.5 Exercise every identified consumer without Workmux on PATH. Record a discovered dependency with its owner and resolve it before retirement. Preserve active attempts, sessions, branches and trees. Restore prior pins for future launches if rollback is needed. Do not retain a non-Pi compatibility carve-out.
@@ -50,6 +58,6 @@ path does not qualify another harness. Final retirement has no non-Pi exception.
 ## 5. Verification and lifecycle gates
 
 - [x] 5.1 For this documentation commit run `nix develop -c openspec validate --all --strict`, `nix build .#checks.aarch64-darwin.org-neutral`, `nix fmt -- --fail-on-change` and `git diff --check`. Scan this branch's changed-content history for environment hosts, home paths and store paths; it must print no matches. Stage only the retirement change and the approved Workbench promise removals.
-- [ ] 5.2 Before implementation review run `nix fmt` for the treefmt gate. Build each affected `nix build .#checks.<system>.<name>` target from 4.2, plus applicable setup and template transport checks. Then run `nix flake check` under repository policy. Do not use `--all-systems` locally; CI owns other-system coverage.
+- [x] 5.2 Before implementation review run `nix fmt` for the treefmt gate. Build each affected `nix build .#checks.<system>.<name>` target from 4.2, plus applicable setup and template transport checks. Then run `nix flake check` under repository policy. Do not use `--all-systems` locally; CI owns other-system coverage.
 - [ ] 5.3 The coordinator reviews the actual diff and evidence independently. It reports milestones, blockers and handoff references to BPH-71. It routes decisions to the operator seat and keeps cross-repository authorization with each owner.
-- [ ] 5.4 Keep evidence and rollback references through review. Archive only after authorized implementation ships. When syncing the durable spec, update the `agentic-devenv` purpose text to describe creator-neutral artifacts rather than the retired YAML. This draft does not complete implementation or approve retirement.
+- [ ] 5.4 Keep evidence and rollback references through review. Archive only after authorized implementation ships. When syncing the durable spec, update the `agentic-devenv` purpose text to describe creator-neutral artifacts rather than the retired YAML. Agentic implementation is complete under the bounded waiver above; durable spec sync and archive remain for the coordinator after integration.

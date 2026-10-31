@@ -1,5 +1,5 @@
 # Refresh only the generated project roles, without running the full shell
-# bootstrap (MCP credentials, memory setup, and workmux are separate).
+# bootstrap (MCP credentials, memory setup, and worktree setup are separate).
 {
   flake.modules.flake.agentic = {config, ...}: {
     perSystem = {pkgs, ...}: {

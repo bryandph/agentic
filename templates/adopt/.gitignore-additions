@@ -6,5 +6,4 @@ result-*
 .devenv/
 .mcp.json
 opencode.json
-.workmux.yaml
 .pre-commit-config.yaml

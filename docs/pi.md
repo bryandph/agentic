@@ -60,8 +60,7 @@ it.
 Role templates reuse the exact compiled body from the other renderers and add
 capability instructions plus `$ARGUMENTS`. They are ordinary prompts in the
 current session, not an enforced tool sandbox or native subagents. Coordinators
-own separate workers through their selected creator (including Herdr or the
-existing Workmux path); no `.pi/agents` registry or orchestration extension is added.
+start separate workers in Herdr worktrees (`herdr worktree create`); no `.pi/agents` registry or orchestration extension is added.
 
 ## Coordinator worktrees
 
@@ -89,7 +88,7 @@ Setup runs declared recursive submodule initialization, file copies, state and
 Git-hook isolation, shell warm-up, then ordered `workbench.worktree.setupHooks`.
 Its JSON result lives in the worktree's own gitdir, not a shared checkout file.
 Warm-up failure is recorded as failure. `agentic-worktree-setup` remains an
-alias, and existing Workmux creation remains supported during this stage.
+alias for the canonical creator-neutral command.
 
 Each `workbench.worktree.teardownHooks` command must exit zero and print a
 stdout line starting `verified:`, without printing `skipped`. Any failure

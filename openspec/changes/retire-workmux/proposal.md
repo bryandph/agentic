@@ -1,13 +1,18 @@
 ## Why
 
+On **2026-10-31**, **Bryan**, relayed by the operator seat, approved agentic-only retirement because **"mesh is Pi-only"**. This waives the qualification matrix (tasks 3.x) and the separate final retirement approval (4.6) for agentic only. It supersedes the earlier all-harness gate only within agentic. Removals in nixspace, home and finance remain requests to their owners; no package uninstall, profile removal or cross-repository change is authorized.
+
+The original cross-repository plan below is historical context where it conflicts with this bounded waiver. Agentic now removes generation and retains creator-neutral setup, teardown and hooks. Legacy option definitions warn and redirect where equivalent; retired generation-only options are ignored with warnings. Other owners retain their own approval gates.
+
 Authoritative work item: BPH-71, under BPH-11. This public change uses work item
 IDs instead of private links.
 
 Workmux manages Git worktrees, setup hooks, terminals, status, launch profiles
 and integration. The current mesh workflow already uses Herdr worktrees and
-panes with Cotal messaging. That path does not yet replace every setup hook or
-prove that a harness accepted an assignment. Removing Workmux before those
-checks pass would lose behavior and hide failures.
+panes with Cotal messaging. Creator-neutral setup and hook isolation remain;
+process launch still does not prove that a harness accepted an assignment.
+The bounded waiver above authorizes agentic removal without claiming the
+original multi-harness qualification passed.
 
 ## What Changes
 
@@ -30,21 +35,23 @@ The operator settled the stage-0 decisions on **2026-10-25**:
 - Cancel BPH-22 and BPH-32. The operator seat updates the tracker. Preserve
   their evidence; do not revive their forks or submit upstream work.
 
-This commit also removes Workmux artifact promises from the active
-`standardize-project-workbench` change. It adds deltas for the durable specs
-that promise those artifacts. These are documentation changes, not runtime
-implementation or removal of active tooling.
+Earlier planning removed Workmux artifact promises from the active
+`standardize-project-workbench` change and added deltas for durable specs.
+The agentic implementation now removes generation, bootstrap installation,
+creator-specific guidance and template promises while preserving setup,
+teardown, hook isolation and their behavioral checks.
 
 The plan gives each responsibility one owner. It separates installed Herdr
 capabilities from repository tooling and the remaining gaps. Each stage has a
-rollback path. Final retirement still requires qualification and separate
-approval. [design.md](design.md) records the sources, owner map, watcher design
+rollback path. Outside agentic, retirement still requires each owner's
+qualification and approval. [design.md](design.md) records the sources, owner map, watcher design
 and gates. [tasks.md](tasks.md) separates completed planning from proposed work.
 
 ## Non-goals
 
-This commit does not uninstall packages, change hooks or configuration, migrate
-active sessions, implement the watcher, merge code or deploy services. It does
+This agentic-only implementation does not uninstall packages, migrate active
+sessions, implement the watcher, merge code or deploy services. It does not
+change another repository's hooks or configuration. It does
 not grant global project trust or allow silent credential, model or billing
 fallback. It does not approve remote-worker qualification or Hermes migration.
 No resource may be adopted or force-removed when its ownership is uncertain.
@@ -76,12 +83,14 @@ infrastructure repository. Repository declarations and trust projection belong
 in the workspace instance. Each repository keeps its safety rules, setup scripts
 and database lifecycle.
 
-This commit changes no runtime export. Later implementation affects
-`agentic.workmux.*`, its `workbench` alias, `agentic.workmuxLib`, generated
-`.workmux.yaml`, status resources and template contracts. Compatibility remains
-only during the reversible migration. All four harness paths must pass before
-the shared retirement. Each repository owner must approve and perform its own
-removals. Removing declarative packages alone does not remove the separate
+Agentic no longer exports generation through `agentic.workmuxLib` or installs
+`.workmux.yaml`. `agentic.worktree.*` and `agentic.worktreeLib.*` are the supported
+setup APIs. Legacy `agentic.workmux.{traits,copyFiles}` definitions (including
+through the `workbench` alias) forward with rename warnings. Generation-only
+options give removal guidance. The same setup, teardown and per-worktree hook
+behavior remains available to every creator. The agentic-only waiver does not
+qualify another repository or authorize its removals. Each repository owner
+must approve and perform its own removals. Removing declarative packages alone does not remove the separate
 imperative user-profile install.
 
 BPH-27 and BPH-59 provide messaging evidence. BPH-70 provides the existing CI

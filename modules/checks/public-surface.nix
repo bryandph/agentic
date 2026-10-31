@@ -1,6 +1,6 @@
 # Pre-Workbench compatibility baseline. The two conventional flake module
 # names must publish the same consumer modules and rendered project artifacts.
-# Existing adapter, agent, memory, and workmux checks cover the file contents.
+# Existing adapter, agent, memory, and worktree checks cover the file contents.
 {
   inputs,
   config,
@@ -18,9 +18,7 @@
         systems = [system];
         imports = [
           entry
-          ({config, ...}: let
-            topConfig = config;
-          in {
+          ({config, ...}: {
             ${namespace} = {
               secrets.backend = "env";
               mcp.servers.fixture = {
@@ -33,7 +31,6 @@
                 baseline-claude = config.mcp-servers.configs.claude-code;
                 baseline-codex = config.mcp-servers.configs.codex;
                 baseline-opencode = config.mcp-servers.configs.opencode;
-                baseline-workmux = topConfig.agentic.workmuxLib.configFile pkgs;
               };
             };
           })
@@ -43,7 +40,7 @@
     byDefault = mkConsumer config.flake.flakeModules.default "agentic";
     byName = mkConsumer config.flake.flakeModules.agentic "agentic";
     byWorkbench = mkConsumer config.flake.flakeModules.workbench "workbench";
-    artifactNames = ["baseline-claude" "baseline-codex" "baseline-opencode" "baseline-workmux"];
+    artifactNames = ["baseline-claude" "baseline-codex" "baseline-opencode"];
     sameArtifact = name: let
       expected = toString byDefault.packages.${system}.${name};
     in

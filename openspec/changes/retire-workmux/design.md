@@ -1,5 +1,9 @@
 ## Status and evidence boundary
 
+On **2026-10-31**, **Bryan**, relayed by the operator seat, approved agentic-only retirement because **"mesh is Pi-only"**. This waives the qualification matrix (tasks 3.x) and the separate final retirement approval (4.6) for agentic only. It supersedes the earlier all-harness gate only within agentic. Removals in nixspace, home and finance remain requests to their owners; no package uninstall, profile removal or cross-repository change is authorized.
+
+The original cross-repository plan below is historical context where it conflicts with this bounded waiver. Agentic now removes generation and retains creator-neutral setup, teardown and hooks. Legacy option definitions warn and redirect where equivalent; retired generation-only options are ignored with warnings. Other owners retain their own approval gates.
+
 BPH-71 sits under BPH-11. The operator settled stage 0 on **2026-10-25**.
 All harnesses retire Workmux together. This plan records those decisions and
 proposes the implementation. It does not authorize changes to active tooling

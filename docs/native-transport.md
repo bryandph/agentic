@@ -23,7 +23,7 @@ devenv loads core's `/devenv.nix` shim, which composes the same
 transport-neutral registry modules as the exported flakeModule and
 wires the same shell module — the artifact set on shell entry
 (`.mcp.json`, opencode config, agent dirs, memory plane,
-`.workmux.yaml`, secret exports) is identical to flake-parts
+secret exports) is identical to flake-parts
 consumption. Repo options go in the repo's own `devenv.nix`
 (`agentic.*`), exactly as a flake consumer would set them.
 

@@ -16,4 +16,5 @@ MCP and appear in generated instructions.
 
 Specialists use one compiled registry body. Claude Code and OpenCode have native
 agent projections; Pi receives ordinary `/role-<name>` prompt templates for the
-current session. Workmux owns worker orchestration.
+current session. The coordinator starts separate workers in Herdr worktrees
+(`herdr worktree create`), running creator-neutral setup before launch.
