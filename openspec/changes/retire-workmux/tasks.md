@@ -8,6 +8,12 @@
 - [x] 1.6 Add MODIFIED and REMOVED deltas for `agentic-devenv` and MODIFIED deltas for `agentic-project-template`. Confirm that durable `agentic-agents` has no Workmux artifact promise and needs no delta.
 - [x] 1.7 Run the documentation gates in section 5 and hand the amended commit to the coordinator. Stage-0 decisions do not approve runtime implementation or final removal.
 
+## Agentic-only waiver
+
+On **2026-10-31**, **Bryan**, relayed by the operator seat, approved agentic-only retirement because **"mesh is Pi-only"**. This waives the qualification matrix (tasks 3.x) and the separate final retirement approval (4.6) for agentic only. It supersedes the earlier all-harness gate only within agentic. Removals in nixspace, home and finance remain requests to their owners; no package uninstall, profile removal or cross-repository change is authorized.
+
+Tasks 3.1–3.10 and 4.6 remain unchecked as waived, not executed. Tasks 4.1 and 4.2 are completed by this branch; verification is recorded after execution. Durable spec sync and archival remain with the coordinator (5.4).
+
 ## 2. Proposed additive implementation
 
 These tasks need implementation review and approval. They do not authorize
@@ -39,8 +45,8 @@ path does not qualify another harness. Final retirement has no non-Pi exception.
 
 ## 4. Proposed consumer migration and final retirement
 
-- [ ] 4.1 In agentic, migrate every source-index path in design.md. Update setup exports, options, bootstrap, generated role guidance, registry entries, docs, templates and ignores. Preserve both transports and one writer per artifact.
-- [ ] 4.2 Preserve the semantics tested by `workmux`, `workmux-worktree-hooks`, `public-surface`, `agents`, `org-neutral` and affected template/bootstrap checks. Give replacement checks suitable names. Do not delete coverage just because its name contains Workmux.
+- [x] 4.1 In agentic, migrate every source-index path in design.md. Update setup exports, options, bootstrap, generated role guidance, registry entries, docs, templates and ignores. Preserve both transports and one writer per artifact.
+- [x] 4.2 Preserve the semantics tested by `workmux`, `workmux-worktree-hooks`, `public-surface`, `agents`, `org-neutral` and affected template/bootstrap checks. Give replacement checks suitable names. Do not delete coverage just because its name contains Workmux.
 - [ ] 4.3 Request coordinated changes from the infrastructure repository and Home Manager owners. Migrate launch profiles, all harness status resources, shared-workflows guidance, skills, registry entries and tests. Preserve native prompt visibility, sounds, telemetry and unrelated MCP behavior. Remove every Workmux dependency at the shared gate.
 - [ ] 4.4 Request qualification from finance, portfolio-balancer and nixos-boards owners before they retire their setup and cleanup hooks. The workspace instance owner verifies the resolved declaration, placement and approved warning-only trust projection. These are proposals for the named owners, not edits authorized in agentic.
 - [ ] 4.5 Exercise every identified consumer without Workmux on PATH. Record a discovered dependency with its owner and resolve it before retirement. Preserve active attempts, sessions, branches and trees. Restore prior pins for future launches if rollback is needed. Do not retain a non-Pi compatibility carve-out.

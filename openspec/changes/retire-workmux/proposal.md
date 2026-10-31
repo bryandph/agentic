@@ -1,5 +1,9 @@
 ## Why
 
+On **2026-10-31**, **Bryan**, relayed by the operator seat, approved agentic-only retirement because **"mesh is Pi-only"**. This waives the qualification matrix (tasks 3.x) and the separate final retirement approval (4.6) for agentic only. It supersedes the earlier all-harness gate only within agentic. Removals in nixspace, home and finance remain requests to their owners; no package uninstall, profile removal or cross-repository change is authorized.
+
+The original cross-repository plan below is historical context where it conflicts with this bounded waiver. Agentic now removes generation and retains creator-neutral setup, teardown and hooks. Legacy option definitions warn and redirect where equivalent; retired generation-only options give removal guidance. Other owners retain their own approval gates.
+
 Authoritative work item: BPH-71, under BPH-11. This public change uses work item
 IDs instead of private links.
 
