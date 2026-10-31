@@ -46,6 +46,7 @@ buildNpmPackage {
     mkdir -p "$out"
     cp -R . "$out/"
     cp ${./agentic.ts} "$out/agentic.ts"
+    cp ${./requirements.ts} "$out/requirements.ts"
     cp ${../../../docs/pi.md} "$out/AGENTIC.md"
     node -e 'const fs = require("node:fs"); const p = JSON.parse(fs.readFileSync(process.env.out + "/package.json")); p.pi.extensions = ["./agentic.ts"]; for (const name of ["pi-ai", "pi-tui", "pi-coding-agent"]) { const key = "@earendil-works/" + name; p.peerDependencies[key] = "*"; p.peerDependenciesMeta[key] = {optional: true}; } fs.writeFileSync(process.env.out + "/package.json", JSON.stringify(p, null, 2));'
     runHook postInstall

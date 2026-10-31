@@ -10,6 +10,26 @@
   }: let
     inherit (pkgs) lib;
     adapter = pkgs.callPackage ../packages/_pi-mcp-adapter {};
+    personaFixture = inputs.flake-parts.lib.mkFlake {inherit inputs;} {
+      systems = [system];
+      imports = [
+        config.flake.flakeModules.default
+        ({config, ...}: {
+          agentic.mcp.servers = {
+            one.external = true;
+            two.external = true;
+          };
+          agentic.agents.fixture = {
+            description = "MCP requirement parser fixture.";
+            platforms = ["cotal"];
+            cotal.role = "worker";
+            mcp = ["one" "two"];
+          };
+          flake.persona = config.agentic.agentsLib.renderCotal "fixture" config.agentic.agents.fixture;
+        })
+      ];
+    };
+    persona = pkgs.writeText "mcp-requirement-persona.md" personaFixture.persona;
     fixtureServer = pkgs.writeShellScript "pi-mcp-fixture-server" ''
       exec ${pkgs.nodejs}/bin/node ${./_fixtures/pi-mcp-stdio.mjs} "$@"
     '';
@@ -78,6 +98,10 @@
       (builtins.readFile ./_fixtures/pi-mcp-runtime-runner.py)
     );
   in {
+    checks.pi-mcp-requirements = pkgs.runCommand "pi-mcp-requirements" {nativeBuildInputs = [pkgs.nodejs];} ''
+      node ${pkgs.writeText "pi-mcp-requirements.mjs" (lib.replaceStrings ["@adapter@" "@persona@"] ["${adapter}" "${persona}"] (builtins.readFile ./_fixtures/pi-mcp-requirements.mjs))}
+      touch "$out"
+    '';
     checks.pi-native-project-config = assert lib.hasInfix ".pi/mcp.json" (builtins.readFile ../registry/_bootstrap.nix);
       pkgs.runCommand "pi-native-project-config" {} ''
         test -e ${project}

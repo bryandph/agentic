@@ -39,7 +39,24 @@
      const initialization = startInitialization(ctx, owner, oauthRuntime, generation, "stale_session_start");
      if (envRaw !== undefined && envRaw !== "__none__") {
        const missingEnvDirectTools = getMissingConfiguredDirectToolServers(
-@@ -1229,13 +1240,15 @@
+@@ -678,4 +689,16 @@
+         await initialization;
+       }
+     }
++    // Observe only this session's completed connect phase; never delay startup.
++    void initialization.then(() => {
++      if (generation !== lifecycleGeneration || !owner.isActive() || !state) return;
++      try {
++        const connected = [...state.manager.getAllConnections()]
++          .filter(([, connection]) => connection.status === "connected")
++          .map(([name]) => name);
++        options.onSessionConnected?.(ctx, connected);
++      } catch {
++        // Requirement discovery/status/reporting is best-effort only.
++      }
++    }).catch(() => {});
+   });
+@@ -1229,13 +1252,16 @@
    // eager call, the tool-groups expansion runs before MCP initialization
    // completes and emits false `[unknown-tool] mcp__<server>` diagnostics.
    syncNamespaceTools(earlyConfig, earlyCache, initialDirectResult.reservedDirectNames, initialDirectResult.activeDirectNames);
@@ -52,16 +69,19 @@
    return function mcpAdapter(pi: ExtensionAPI) {
      installMcpAdapter(pi, {
 +      ...(options.resolveSessionConfig !== undefined ? { resolveSessionConfig: options.resolveSessionConfig } : {}),
++      ...(options.onSessionConnected !== undefined ? { onSessionConnected: options.onSessionConnected } : {}),
 +      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
        ...(options.configPath !== undefined ? { configPath: options.configPath } : {}),
        ...(factoryConfig !== undefined ? { config: cloneMcpConfig(factoryConfig) } : {}),
      });
 --- a/types.ts
 +++ b/types.ts
-@@ -624,6 +624,12 @@
+@@ -624,6 +624,14 @@
  }
  
  export interface McpAdapterOptions {
++  /** Agentic: best-effort observation after the session startup connect phase. */
++  onSessionConnected?: (ctx: import("@earendil-works/pi-coding-agent").ExtensionContext, connected: string[]) => void;
 +  /** Agentic: isolated config, freshly authorized after previous session teardown.
 +   * Requires config to select upstream's programmatic (no ambient reads) mode.
 +   */
