@@ -286,7 +286,8 @@ the affected checkout's shell to install a fresh hook afterwards.
 ### Worktree setup and verified teardown
 
 Both shell transports include `workbench-worktree-setup`,
-`workbench-worktree-teardown` and `workbench-worker-start`. Run them from the main checkout's dev shell
+`workbench-worktree-teardown`, `workbench-worker-start`, and
+`workbench-worktree-remove`. Run them from the main checkout's dev shell
 against the path returned by the creator; do not infer it from the branch name.
 The coordinator owns this sequence:
 
@@ -298,17 +299,23 @@ The coordinator owns this sequence:
    The command checks setup and prompt-file readability before launching once,
    without `exec`, then observes Herdr (never mesh roster presence). It refuses
    missing, failed or stale setup; resolve that failure before launching.
-4. After review and repository-specific resource reconciliation, run
-   `workbench-worktree-teardown --worktree <path>`.
-5. Only after teardown succeeds and the tree is safe to remove, the coordinator
-   runs `herdr worktree remove --workspace <id>`. Stock Git refuses removal
-   of worktrees containing initialized submodules, even after deinit: only for
-   a coordinator-owned worktree, after successful teardown and a clean
-   `git status`, the coordinator may choose
-   `herdr worktree remove --workspace <id> --force`. Never force dirty or
-   ambiguously owned trees. A failed cleanup vetoes removal. Teardown never
-   deletes a checkout, forces Git removal or adopts resources of uncertain
-   ownership.
+4. After review and repository-specific resource reconciliation, confirm the
+   worker has finished and run
+   `workbench-worktree-remove --workspace <id> --worktree <path>`.
+   The removal barrier verifies Herdr's workspace/path agreement and linked
+   Git membership, refuses main checkouts, dirty or untracked paths, and
+   working/blocked agents, then runs the repository's verified teardown.
+   Only then does it ask Herdr to remove the worktree, without deleting its
+   branch. Omit `--worktree` to resolve the path from Herdr's workspace JSON
+   and worktree list. A mismatch refuses removal.
+5. Retain its single JSON record (`status`, `reason`, `workspace`, `worktree`,
+   `teardown`, `herdr`). Exit zero means `removed`; `refused` or `failed`
+   requires preserving the diagnostics and escalating, not direct removal.
+   Teardown stdout, stderr and verified lines are retained in the record.
+   Only Git's specific initialized-submodule refusal permits an automatic
+   `--force` retry, with fresh clean-tree and recursive submodule checks after
+   successful teardown in this invocation. No auto-stash, untracked-file
+   deletion, branch deletion or arbitrary force fallback is performed.
 
 `workbench-worker-start` prints one JSON record with `status`, `pane`,
 `workspace`, `worktree`, `agent`, native `session`, `agentStatus`, `evidence`,
@@ -336,7 +343,7 @@ Pi's project-trust UI is detected as `idle`, with
 not `blocked`. `not-started` plus the pane tail is the signal to inspect and
 escalate this prompt; no trust response is automated.
 
-Setup and teardown default to the current directory. Setup preserves per-worktree
+Setup and standalone teardown default to the current directory. Setup preserves per-worktree
 copies, isolated writable `.direnv`/`.devenv` state, and Git hooks. Declared
 submodules initialize recursively, before shell warm-up. Warm-up failure is a
 setup failure, not success with a warning. Rerunning setup is idempotent for
@@ -372,7 +379,7 @@ Configure `workbench.worktree` (or `agentic.worktree`):
   line. Hooks must verify actual resource absence, not merely command dispatch.
   A failure stops the runner; no declared teardown hooks succeeds with a note.
 
-`agentic.worktreeLib.{setupScript,hooksScript,teardownScript,workerStartScript} pkgs` exposes the
+`agentic.worktreeLib.{setupScript,hooksScript,teardownScript,workerStartScript,removeScript} pkgs` exposes the
 same runners and the Git-hook isolation helper. These are the supported APIs;
 legacy creator-specific traits and copy options warn and redirect to them.
 Legacy generation-only settings are ignored with warnings; delete them on a pin
@@ -380,7 +387,7 @@ bump. They no longer generate artifacts or affect coordinator behavior.
 `agentic-worktree-setup` remains an executable alias. The Claude
 `WorktreeCreate` hook and coordinator-created Herdr worktrees use the same
 canonical setup command. No creator configuration is generated or installed.
-The contributor shell also supplies both runners from this repository's own
+The contributor shell also supplies all four runners from this repository's own
 registry configuration.
 
 #### Setup result and check codes

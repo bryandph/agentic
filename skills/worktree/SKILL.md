@@ -25,19 +25,30 @@ Follow your coordinator persona for escalation policy and authorization.
    `git worktree add` or `herdr workspace create`.
 4. Run `workbench-worktree-setup --worktree <path>` with the returned path.
    A non-zero exit is a stop: retain the diagnostics and escalate before
-   dispatching work. A successful setup does not prove worker readiness;
-   verify readiness through the actual harness before handing over the task.
+   dispatching work. A successful setup does not prove worker readiness.
+5. Start the selected worker in the returned, available shell pane:
+   `workbench-worker-start --pane <pane> --worktree <path> --timeout 30 -- <launcher> --prompt-file <file>`.
+   Inspect its JSON result and escalate blocked or failed startup; do not
+   answer prompts or retry blindly. Herdr startup evidence is not assignment
+   acceptance: wait separately for the worker's first acknowledgement.
 
 ## Remove
 
 1. Confirm the worker has finished and the checkout belongs to this assignment.
-   Inspect `git status` in that checkout; preserve uncommitted work and stop
-   if ownership or the safe cleanup decision is unclear.
-2. Run `workbench-worktree-teardown --worktree <path>`. It must succeed before
-   removal. On failure, stop and escalate; do not remove the checkout.
-3. Run `herdr worktree remove --workspace <id>` with the recorded workspace ID.
-   Use `--force` only for a worktree you own, with a clean `git status`, after
-   a verified successful teardown. It is not a recovery shortcut.
-4. Record cleanup results for the coordinator's handoff.
+   Preserve uncommitted work and stop if ownership is unclear.
+2. From this repository's dev shell, run
+   `workbench-worktree-remove --workspace <id> --worktree <path>` with the
+   recorded workspace ID and path. Omit `--worktree` only to resolve it from
+   Herdr; the command always checks workspace and checkout agreement.
+3. Retain the JSON result for the coordinator's handoff. Only `status: removed`
+   (exit zero) means success. A refusal is a stop: preserve its diagnostics and
+   escalate, never bypass the barrier with direct Herdr or Git removal.
+
+The command refuses main or foreign checkouts, dirty/untracked paths, running
+or blocked workspace agents, and failed teardown verification. It preserves
+teardown output. Initialized submodules permit an automatic `--force` retry
+only for Git's specific submodule removal refusal after successful teardown
+and fresh clean-tree checks, including recursive submodules. It never deletes
+branches, stashes changes, or deletes untracked files.
 
 Never use `--no-verify` or any other hook or check bypass.

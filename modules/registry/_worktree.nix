@@ -227,6 +227,14 @@
         }
       '';
     };
+  removeScript = pkgs:
+    pkgs.writeShellApplication {
+      name = "workbench-worktree-remove";
+      runtimeInputs = [pkgs.python3];
+      text = ''
+        exec python3 ${./_worktree-remove.py} "$@"
+      '';
+    };
 in {
   options.agentic.worktree = {
     traits = {
@@ -261,7 +269,7 @@ in {
   options.agentic.worktreeLib = lib.mkOption {
     type = lib.types.raw;
     readOnly = true;
-    description = "Creator-neutral setupScript pkgs, hooksScript pkgs (isolated Git hooks), teardownScript pkgs, and workerStartScript pkgs.";
+    description = "Creator-neutral setupScript pkgs, hooksScript pkgs (isolated Git hooks), teardownScript pkgs, workerStartScript pkgs, and removeScript pkgs.";
   };
-  config.agentic.worktreeLib = {inherit setupScript hooksScript teardownScript workerStartScript;};
+  config.agentic.worktreeLib = {inherit setupScript hooksScript teardownScript workerStartScript removeScript;};
 }

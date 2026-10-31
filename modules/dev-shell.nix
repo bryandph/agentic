@@ -34,6 +34,7 @@ in {
         (own.lib.worktree.setupScript pkgs)
         (own.lib.worktree.teardownScript pkgs)
         (own.lib.worktree.workerStartScript pkgs)
+        (own.lib.worktree.removeScript pkgs)
       ];
     };
   };
