@@ -1,15 +1,24 @@
 # agentic-devenv Specification
 
 ## Purpose
-Project shell bootstrap of workflow artifacts (MCP config, agent dirs, memory plane, generated .workmux.yaml) that is worktree-aware and consumable through both the flake-parts and devenv-native transports.
+Project shell bootstrap of workflow artifacts (MCP config, agent dirs, memory plane) plus creator-neutral worktree setup, teardown and per-worktree hook helpers. It is worktree-aware and consumable through both the flake-parts and devenv-native transports, and needs no generated worktree-manager configuration.
 ## Requirements
-
 ### Requirement: Shell bootstrap of workflow artifacts
-The Devenv module SHALL place the project workflow artifacts: MCP config (`.mcp.json`, OpenCode configuration, and `.codex/config.toml`), agent directories (`.claude/agents`, `.opencode/agents`), the generated `.serena/project.yml` and generated read-only memory namespace, and the generated `.workmux.yaml` — all sourced from the registries and idempotent when inputs are unchanged. Project MCP files SHALL be declared through Devenv's managed-file lifecycle rather than created or overwritten by shell-entry `ln` commands. Dynamic operations that cannot be expressed as managed files MAY remain in shell bootstrap. `AGENTS.md` and `CLAUDE.md` are committed artifacts governed by `agentic-agents`, not shell-entry placements.
+The Devenv module SHALL place MCP config (`.mcp.json`, OpenCode configuration,
+and `.codex/config.toml`), agent directories (`.claude/agents` and
+`.opencode/agents`), the generated `.serena/project.yml`, and the generated
+read-only memory namespace. Registries SHALL supply those artifacts. Bootstrap
+SHALL be idempotent when its inputs are unchanged. Project MCP files SHALL use
+Devenv's managed-file lifecycle rather than shell-entry `ln` commands. Dynamic
+operations that cannot use managed files MAY remain in shell bootstrap.
+`AGENTS.md` and `CLAUDE.md` SHALL remain committed artifacts governed by
+`agentic-agents`, not shell-entry placements. Bootstrap MUST NOT generate or
+require `.workmux.yaml` after retirement.
 
 #### Scenario: fresh clone becomes workflow-complete
 - **WHEN** a consumer repo is cloned and its dev shell entered once
-- **THEN** all three project MCP artifacts, agent dirs, and `.workmux.yaml` are present and consistent with the repo's declared configuration (`AGENTS.md` and `CLAUDE.md` were already present in the clone as committed files)
+- **THEN** all three project MCP artifacts, agent directories and memory artifacts are present and match the declared configuration
+- **AND** committed instructions remain available from the clone without a generated Workmux configuration
 
 #### Scenario: managed project MCP files are stable
 - **WHEN** the shell is re-entered with unchanged registry inputs
@@ -18,31 +27,6 @@ The Devenv module SHALL place the project workflow artifacts: MCP config (`.mcp.
 #### Scenario: conflicting regular project file is preserved
 - **WHEN** a Devenv-managed MCP target is occupied by an unrelated regular file
 - **THEN** shell preparation fails with a diagnostic instead of silently overwriting the file
-
-### Requirement: Generated workmux project config
-`.workmux.yaml` SHALL be generated from module options rather than
-hand-maintained, with defaults keyed on declared repo traits rather than
-applied universally: submodule re-initialization in `post_create` when the
-repo has submodules; dev-shell cache reuse via `.direnv` symlinking ONLY
-when the repo declares no stateful devenv services (services keep
-per-worktree state — databases, process dirs — and must not be shared);
-secret-bearing dotfiles (e.g. a vault-resolved `.env`) copied per
-worktree, never symlink-shared. Repos override via options, not by
-editing the generated file. The generation SHALL preserve the operational
-rationale currently documented in the hand-maintained files as header
-comments.
-
-#### Scenario: submodule repo gets mitigations by default
-- **WHEN** a repo with submodules and no devenv services enables the
-  module without overrides
-- **THEN** the generated `.workmux.yaml` contains the submodule init hook
-  and the `.direnv` symlink entry
-
-#### Scenario: services repo does not share worktree state
-- **WHEN** a repo declaring stateful devenv services and a secret-bearing
-  `.env` (the finance shape) enables the module without overrides
-- **THEN** the generated `.workmux.yaml` omits the `.direnv`/`.devenv`
-  symlinks and lists `.env` under per-worktree copies
 
 ### Requirement: Flake-first devenv module, native transport optional
 The Devenv module SHALL be fully functional under flake consumption (the flake-parts `devenv.shells` path) — this is the primary contract and no capability may require the devenv-native transport. The module SHALL additionally be consumable devenv-natively (`devenv.yaml` imports / polyrepo `inputs.<name>.devenv.config`) as an opt-in for repos wanting the eval-cache/worktree benefits; a repo using the native transport alongside a flake MUST keep the two core pins coherent (`devenv.yaml` generated from or CI-checked against `flake.lock`, which remains the authoritative version statement). Both transports SHALL use the same Devenv managed-file declarations and project-tier renderer for Claude Code, OpenCode, and Codex. Where Devenv's first-party integrations already own a compatible artifact without creating another writer, the module SHALL build on them; otherwise the generic Devenv files layer SHALL provide transport-neutral placement.
@@ -61,39 +45,37 @@ The Devenv module SHALL be fully functional under flake consumption (the flake-p
 - **THEN** enabling project MCP delivery does not cause Devenv or mcp-servers-nix to take ownership of that settings file
 
 ### Requirement: One worktree setup path for all creators
-Worktree preparation SHALL live in a single setup script (submodule
-re-init, `direnv allow`, devenv cache reuse) invoked by every worktree
-creator: the generated `.workmux.yaml` `post_create` hook and a Claude
-Code `WorktreeCreate` hook at minimum. Worktree creators MUST NOT carry
-divergent copies of the setup logic.
+Worktree preparation SHALL use one repository-owned setup script for every
+supported creator, including coordinator-run Herdr creation and Claude Code's
+`WorktreeCreate` hook. The script SHALL initialize declared submodules, prepare
+the environment and isolate Git hooks and writable state per worktree. It MAY
+reuse shared Nix store outputs. It MUST NOT share writable `.direnv` or `.devenv`
+state. Creators SHALL await the setup result before launching a harness. A failed
+setup SHALL remain visible and MUST NOT be reported as readiness. Creators MUST
+NOT carry divergent copies of setup logic or require Workmux to invoke it.
 
-#### Scenario: workmux and Claude Code worktrees are prepared identically
-- **WHEN** a worktree is created via `workmux add` and another via Claude
-  Code's native worktree mechanism
-- **THEN** both invoke the same setup script and yield identically
-  prepared worktrees (submodules initialized, direnv allowed)
+#### Scenario: supported creators prepare worktrees identically
+- **WHEN** a coordinator creates one worktree through Herdr and Claude Code creates another through its native worktree mechanism
+- **THEN** both invoke the same setup script and yield equivalent preparation for the declared repository traits
+- **AND** both preserve per-worktree hooks and writable state without Workmux
+
+#### Scenario: setup fails before launch
+- **WHEN** repository preparation fails
+- **THEN** the creator exposes the setup failure before launching a worker and does not treat a workspace-created event as setup completion
 
 ### Requirement: Worktree-aware bootstrap
-The bootstrap SHALL function under git worktree gitdir indirection: it MUST
-NOT assume `.git` is a directory, and MUST resolve paths correctly when
-`.git` is a gitlink file pointing into a `__worktrees` gitdir. In the known
-failure mode (devenv cannot initialize inside a worktree of a submodule —
-if re-testing under current devenv/Nix confirms it persists), the failure
-SHALL surface loudly with a diagnostic that names the constraint and the
-documented workaround — it MUST NOT leave a silently half-configured
-shell. Because devenv fails to initialize in that mode, the diagnostic
-MUST be emitted by a component that still executes when the shell never
-starts (the generated `.envrc` wrapper or the worktree setup script), not
-by enterShell.
+Bootstrap SHALL handle Git worktree indirection. It MUST NOT assume `.git` is a
+directory. It SHALL resolve a `.git` file that points into a linked-worktree
+Git directory. If current Nix or Devenv cannot initialize a worktree of a
+submodule, preparation SHALL emit a diagnostic that names the constraint and
+the ad-hoc `nix shell` workaround. That diagnostic SHALL run before shell entry,
+through the `.envrc` wrapper or setup script, so it still runs when the shell
+cannot start. Preparation MUST NOT leave silent partial artifacts.
 
 #### Scenario: worktree of the parent repo works
-- **WHEN** the shell is entered in a workmux-created worktree of a
-  top-level repo
-- **THEN** the bootstrap completes identically to the primary checkout
+- **WHEN** the shell is entered in a Herdr-created worktree of a top-level repo
+- **THEN** bootstrap completes as it does in the primary checkout without a Workmux dependency
 
 #### Scenario: known-broken environment degrades explicitly
-- **WHEN** the shell is entered in a worktree of a submodule where devenv
-  initialization fails (and thus enterShell never runs)
-- **THEN** the `.envrc` wrapper or worktree setup script emits an explicit
-  diagnostic describing the worktree×submodule constraint and the ad-hoc
-  `nix shell` workaround, and no partial artifacts are left behind
+- **WHEN** the shell is entered in a worktree of a submodule where Devenv initialization fails before enterShell
+- **THEN** the `.envrc` wrapper or setup script emits the constraint and ad-hoc `nix shell` workaround before placing partial artifacts
