@@ -65,13 +65,30 @@
           description = ''Fixture "mesh" persona.'';
           fragments = ["fixture-review"];
           platforms = ["cotal"];
+          mcp = ["serena"];
+          scope = {
+            paths = ["modules/"];
+            forbidden = ["secrets/"];
+            delegateTo = ["reviewer"];
+          };
+          capabilities = {
+            edit = true;
+            exec = true;
+          };
           cotal = {
             role = "relay";
+            tags = ["mesh" "edit"];
+            escalateTo = "decision-seat";
             agent = "pi";
             subscribe = ["general"];
             allowSubscribe = ["general" "team.>"];
             allowPublish = ["general"];
           };
+        };
+        decision-seat = {
+          description = "Fixture escalation target.";
+          platforms = ["cotal"];
+          cotal.role = "coordinator";
         };
       };
 
@@ -139,19 +156,71 @@
       flake.agenticProbe.body = config.agentic.agentsLib.renderCotal "broken" config.agentic.agents.broken;
     }) "body";
 
+    cotalUnknownMcpFails = failing ({config, ...}: {
+      agentic.agents.broken = {
+        description = "cotal-only undefined MCP reference";
+        platforms = ["cotal"];
+        cotal.role = "relay";
+        mcp = ["undefined-server"];
+      };
+      flake.agenticProbe.body = config.agentic.agentsLib.renderCotal "broken" config.agentic.agents.broken;
+    }) "body";
+
+    unknownDelegateFails = lib.all (renderer:
+      failing ({config, ...}: {
+        agentic.agents.broken = {
+          description = "unknown delegation target";
+          scope.delegateTo = ["undefined-agent"];
+          cotal.role = "relay";
+        };
+        flake.agenticProbe.body = config.agentic.agentsLib.${renderer} "broken" config.agentic.agents.broken;
+      }) "body") ["renderClaude" "renderCodex" "renderOpencode" "renderPi" "renderCotal"];
+
+    invalidEscalationFails = target:
+      failing ({config, ...}: {
+        agentic.agents = {
+          broken = {
+            description = "invalid escalation target";
+            platforms = ["cotal"];
+            cotal.role = "relay";
+            cotal.escalateTo = target;
+          };
+          non-cotal.description = "not on the mesh";
+          no-role = {
+            description = "mesh target without a role";
+            platforms = ["cotal"];
+          };
+        };
+        flake.agenticProbe.body = config.agentic.agentsLib.renderCotal "broken" config.agentic.agents.broken;
+      }) "body";
+
     p = fixture.agenticProbe;
+    relayBody = lib.last (lib.splitString "---" p.relayCotal);
 
     scopeLine = "Never read, modify, or act on: `secrets/`.";
   in {
     checks.agents-registry =
-      # Cotal persona: identity in the frontmatter, bare fragment text below it.
-      assert lib.hasInfix "Fixture review card" p.relayCotal;
-      assert !(lib.hasInfix "## Review discipline" p.relayCotal);
-      assert !(lib.hasInfix ''Fixture "mesh" persona.'' (lib.last (lib.splitString "---" p.relayCotal)));
+      # Cotal persona: fragments first, then plain structured instructions.
+      assert lib.hasPrefix "\n\nFixture review card" relayBody;
+      assert !(lib.hasInfix "##" relayBody);
+      assert !(lib.hasInfix ''Fixture "mesh" persona.'' relayBody);
+      assert lib.hasInfix "Operate only within: `modules/`." relayBody;
+      assert lib.hasInfix scopeLine relayBody;
+      assert lib.hasInfix "If a task crosses out of this scope, hand off to: reviewer." relayBody;
+      assert lib.hasInfix "Required for this role: `serena`." relayBody;
+      assert lib.hasInfix "File edits: permitted." relayBody;
+      assert lib.hasInfix "Shell commands: permitted." relayBody;
+      assert lib.hasInfix "Web access: not permitted." relayBody;
+      assert lib.hasInfix "Send decisions and escalations to the peer with Cotal role `coordinator`; find that peer on the roster by role because presence names change on restart." relayBody;
       assert lib.hasInfix "role: \"relay\"" p.relayCotal;
       assert lib.hasInfix "agent: \"pi\"" p.relayCotal;
       assert !(lib.hasInfix "model:" p.relayCotal);
       assert cotalRoleMissingFails;
+      assert cotalUnknownMcpFails;
+      assert unknownDelegateFails;
+      assert invalidEscalationFails "undefined-agent";
+      assert invalidEscalationFails "non-cotal";
+      assert invalidEscalationFails "no-role";
       # Capability-derived Claude grants + overrides win/augment.
       assert lib.hasInfix "Edit" p.builderClaude;
       assert lib.hasInfix "Bash" p.builderClaude;
@@ -266,7 +335,11 @@
           relay = frontmatter(os.environ['personas'] + '/relay.md')
           assert relay['name'] == 'relay' and relay['role'] == 'relay' and relay['agent'] == 'pi'
           assert relay['subscribe'] == ['general'] and relay['allowSubscribe'] == ['general', 'team.>']
-          assert relay['allowPublish'] == ['general'] and relay['tags'] == []
+          assert relay['allowPublish'] == ['general']
+          assert relay['tags'] == ['mesh', 'edit', 'exec']
+          assert 'capabilities' not in relay
+          assert 'mcp' not in relay
+          assert 'escalateTo' not in relay
           assert 'Fixture review card' in pathlib.Path(os.environ['personas'] + '/relay.md').read_text()
           # Match Codex's launch-time loader, not just its discovery parser.
           # Directory symlinks are supported; final-component symlinks are not.

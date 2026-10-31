@@ -348,12 +348,19 @@ rejects individual role symlinks, so its directory contains regular TOML files.
 An agent that lists `cotal` and sets `cotal.role` becomes a Cotal persona
 (`.cotal/agents/<name>.md`): mesh identity and channel ACLs
 (`cotal.{role,agent,model,tags,subscribe,allowSubscribe,allowPublish}`) in the
-frontmatter, and the agent's fragment text, bare, as the persona body (it is
-appended to the system prompt). `packages.<system>.cotal-personas`
-is the link farm; the environment places it at its space root, since a persona
-catalog belongs to a mesh, not a project. No Cotal capability (`spawn`, `run`)
-is rendered: those address a Cotal manager, and starting agents is the
-environment's launcher concern.
+frontmatter. Tags combine `cotal.tags` with enabled `edit`, `exec` and `web`
+capabilities, without duplicates. The persona body starts with bare fragment
+text, then plain scope, required MCP server and capability sentences, without
+a description line or headings. MCP references are validated even for Cotal-only
+agents: undefined servers fail rendering and external servers warn.
+`scope.delegateTo` must name registered agents on every platform.
+Optional `cotal.escalateTo` names a registered Cotal agent with a role; the body
+directs decisions and escalations to that role through roster lookup, since
+presence names change on restart. `packages.<system>.cotal-personas` is the link
+farm; the environment places it at its space root, since a persona catalog
+belongs to a mesh, not a project. Neither MCP requirements nor escalation targets
+are frontmatter keys. No Cotal control-plane capability (`spawn`, `run`) is
+rendered: starting agents is the environment's launcher concern.
 
 ### CI cache profile contract
 
