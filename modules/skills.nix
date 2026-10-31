@@ -55,6 +55,8 @@
       cfg.library;
   in {
     options.agentic.skills = {
+      coordination.enable = lib.mkEnableOption "Herdr worktree, coordinator merge and worker rebase skills";
+
       library = lib.mkOption {
         type = lib.types.attrsOf skillType;
         default = {};
@@ -83,6 +85,26 @@
 
     config = lib.mkMerge [
       {agentic.skills.lib = {inherit renderedFiles;};}
+
+      (lib.mkIf cfg.coordination.enable {
+        agentic.skills.library = {
+          worktree = {
+            canonical = ../skills/worktree/SKILL.md;
+            title = "Worktree";
+            description = "Create and remove worker worktrees with Herdr and the repository lifecycle runners. Use as a coordinator when preparing or cleaning up an assigned worker checkout.";
+          };
+          merge = {
+            canonical = ../skills/merge/SKILL.md;
+            title = "Merge";
+            description = "Review and serialize a worker branch merge into its assigned base, rerun checks and watch required CI. Use as a coordinator when integrating completed work.";
+          };
+          rebase = {
+            canonical = ../skills/rebase/SKILL.md;
+            title = "Rebase";
+            description = "Rebase an assigned worker branch onto its explicit base, resolve conflicts and rerun checks without bypassing hooks or rewriting shared branches. Use when a worker branch needs updating.";
+          };
+        };
+      })
 
       (lib.mkIf (acfg.workTracking.prefix != null) {
         agentic.skills.library.work-tracking = {

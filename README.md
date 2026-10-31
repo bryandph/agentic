@@ -382,6 +382,37 @@ grant trust, prove mesh acceptance, replace native harness status or authorize
 cleanup. Repository owners retain their safety flags and external-resource
 lifecycle policy.
 
+### Skills
+
+Core renders canonical bodies to `.claude/skills/<name>/SKILL.md` and discovery
+wrappers to `.agents/skills/<name>/SKILL.md`. Consumers commit both projections;
+`nix run .#write-agent-skills` refreshes them, and `agent-skills-drift` checks
+for drift. Work tracking and memory join the library when their capabilities
+are configured. Add repository-specific skills through `agentic.skills.library`.
+
+The Herdr coordination skills are opt-in and default to off. In a consuming
+flake-parts module that imports core's flake module, enable them with:
+
+```nix
+workbench.skills.coordination.enable = true;
+```
+
+The compatibility spelling `agentic.skills.coordination.enable = true;` selects
+the same option. This adds `/worktree`, `/merge` and `/rebase`: coordinators
+own Herdr worktree creation and teardown and reviewed, serialized integration;
+workers may rebase their assigned branches but never merge their own work.
+The skills use the repository's lifecycle runners and checks and refer to your
+coordinator persona for escalation policy. They do not create a coordinator
+persona or grant permission to merge or publish.
+
+The coordinator procedure lives in the consumer's coordinator persona, its
+single source of truth; core does not ship a `/coordinator` skill. The legacy
+`/coordinator` and workmux-based `/merge`, `/rebase` and `/worktree` skills are
+retired in favor of that persona and these opt-in skills. Remove stale legacy
+copies from consumer and user skill directories when adopting the replacements;
+the writer does not delete unmanaged skills. Core does not enable or commit
+these skill projections for itself.
+
 ### Agent role projections
 
 `agentic.agents.<name>` composes knowledge fragments, scope, capabilities, and
