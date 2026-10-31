@@ -39,6 +39,7 @@ in {
 
   imports = [
     (lib.mkAliasOptionModule ["workbench"] ["agentic"])
+    ./modules/registry/_secret-scanning.nix
     ./modules/registry/_secrets.nix
     ./modules/registry/_mcp.nix
     ./modules/registry/_forges.nix
@@ -54,6 +55,17 @@ in {
     ./modules/registry/_bootstrap.nix
     ./modules/registry/_core-fragments.nix
     ./modules/_git-hooks/devenv.nix
+    ({
+      lib,
+      pkgs,
+      config,
+      ...
+    }: {
+      config = import ./modules/_secret-scanning/hook.nix {
+        inherit lib pkgs;
+        scanning = config.agentic.secretScanning;
+      };
+    })
     (builtins.toPath "${locked "mcp-servers-nix"}/modules/devenv.nix")
   ];
 

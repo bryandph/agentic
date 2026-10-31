@@ -16,6 +16,7 @@
       # Both public names resolve to the existing registry option graph.
       # Moving the implementation namespace is a later migration step.
       (lib.mkAliasOptionModule ["workbench"] ["agentic"])
+      ./registry/_secret-scanning.nix
       ./registry/_secrets.nix
       ./registry/_mcp.nix
       ./registry/_forges.nix
