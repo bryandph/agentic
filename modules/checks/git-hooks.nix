@@ -66,6 +66,7 @@
         prekStore = "${pkgs.prek}";
       } ''
         bash ${./_git-hooks/fixture.sh}
+        bash ${./_git-hooks/checkouts.sh}
         touch $out
       '';
   };

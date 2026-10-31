@@ -74,23 +74,57 @@ def gitdirs(common):
                     yield from (p for p in gitdirs(path) if p != path)
 
 
-def checkouts(directory):
+def checkouts(directory, common, main_checkout):
+    candidate = None
     if (directory / "gitdir").is_file():
-        return [Path((directory / "gitdir").read_text().rstrip("\n")).parent]
-    try:
-        # The first record is this common gitdir's main checkout, even when
-        # linked checkouts have disappeared (and are marked prunable).
-        records = git("--git-dir", directory, "worktree", "list", "--porcelain", "-z").split("\0")
-        return [Path(next(line[9:] for line in records if line.startswith("worktree ")))]
-    except (subprocess.CalledProcessError, StopIteration):
-        return []
+        # With worktree.useRelativePaths, this is relative to the registration
+        # directory, not the doctor's CWD (and points at the checkout's .git).
+        gitfile = Path((directory / "gitdir").read_text().rstrip("\n"))
+        if not gitfile.is_absolute():
+            gitfile = directory / gitfile
+        candidate = gitfile.resolve().parent
+    elif directory == common and main_checkout is not None:
+        candidate = main_checkout
+    else:
+        # --git-dir worktree list can mistake a submodule gitdir for its main
+        # checkout. Isolation moves core.worktree into config.worktree, so
+        # consult that file first, then the common config.
+        for filename in ("config.worktree", "config"):
+            try:
+                value = git("config", "--file", directory / filename, "--get", "core.worktree")
+            except subprocess.CalledProcessError:
+                continue
+            candidate = Path(value)
+            if not candidate.is_absolute():
+                candidate = directory / candidate
+            break
+    if candidate is not None:
+        candidate = candidate.resolve()
+        try:
+            actual = Path(git("-C", candidate, "rev-parse", "--absolute-git-dir"))
+            if actual.resolve() == directory.resolve():
+                return [candidate]
+        except subprocess.CalledProcessError:
+            pass
+    # An absent/reused checkout must not fabricate config paths inside the
+    # gitdir or accidentally adopt a directory now owned by its parent repo.
+    return []
 
 
 def doctor(repository, fix):
     common = Path(git("-C", repository, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    invoked = Path(git("-C", repository, "rev-parse", "--absolute-git-dir"))
+    if invoked.resolve() == common.resolve():
+        main_checkout = Path(git("-C", repository, "rev-parse", "--show-toplevel"))
+    elif common.name == ".git":
+        main_checkout = common.parent
+    else:
+        # A linked worktree of a submodule must resolve its main checkout
+        # through the common gitdir's core.worktree, just like nested modules.
+        main_checkout = None
     directories = {}
     for directory in gitdirs(common):
-        contexts = checkouts(directory)
+        contexts = checkouts(directory, common, main_checkout)
         directories.setdefault(directory / "hooks", set()).update(contexts)
         for checkout in contexts:
             try:
@@ -110,9 +144,12 @@ def doctor(repository, fix):
                 continue
             prek, config = data
             reasons = []
-            dangling_for_all = Path(prek).is_absolute() and not Path(prek).exists()
-            if dangling_for_all:
+            dangling_for_all = not contexts
+            if not contexts:
+                reasons.append("orphaned gitdir, no checkout")
+            if Path(prek).is_absolute() and not Path(prek).exists():
                 reasons.append(f"missing prek: {prek}")
+                dangling_for_all = True
             if config is not None and Path(config).is_absolute():
                 if not Path(config).exists():
                     reasons.append(f"missing config: {config}")

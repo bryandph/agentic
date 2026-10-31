@@ -268,7 +268,10 @@ guaranteed in that environment.
 
 `agentic-hooks-doctor [--fix] [repository]` scans the main gitdir, submodule
 gitdirs (including deinitialized submodules), and their linked worktrees for
-prek-generated hooks with missing executables or configurations. It is included
+prek-generated hooks with missing executables or configurations, or in orphaned
+gitdirs with no verified checkout. Relative worktree registrations and submodule
+`core.worktree` (including migrated `config.worktree`) resolve against their own
+gitdir, never the doctor's current directory. It is included
 in the module and `agentic.devenvLib.packages`; without a shell, run
 `nix run <agentic>#agentic-hooks-doctor -- /path/to/repo`. Reports exit 1 when
 dangling hooks are found, including on `--fix`; a clean scan exits 0 and an
