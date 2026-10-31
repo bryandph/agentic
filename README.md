@@ -285,18 +285,19 @@ the affected checkout's shell to install a fresh hook afterwards.
 
 ### Worktree setup and verified teardown
 
-Both shell transports include `workbench-worktree-setup` and
-`workbench-worktree-teardown`. Run them from the main checkout's dev shell
+Both shell transports include `workbench-worktree-setup`,
+`workbench-worktree-teardown` and `workbench-worker-start`. Run them from the main checkout's dev shell
 against the path returned by the creator; do not infer it from the branch name.
 The coordinator owns this sequence:
 
 1. `herdr worktree create --cwd <repo> --branch <branch> --base <base> --no-focus`
    — record the returned checkout path, workspace ID and pane ID.
 2. `workbench-worktree-setup --worktree <path>` — await its result.
-3. Inspect `workbench-worktree-setup --check <path>`, then launch the selected
-   worker in its exact pane. Failed, missing or stale setup is a **warning to
-   act on, never a launcher block**; it is not evidence of readiness. Resolve
-   the failure before claiming the assignment is ready or accepted.
+3. Start the selected worker in its exact, available shell pane:
+   `workbench-worker-start --pane <pane> --worktree <path> --timeout 30 -- <launcher> --prompt-file <file>`.
+   The command checks setup and prompt-file readability before launching once,
+   without `exec`, then observes Herdr (never mesh roster presence). It refuses
+   missing, failed or stale setup; resolve that failure before launching.
 4. After review and repository-specific resource reconciliation, run
    `workbench-worktree-teardown --worktree <path>`.
 5. Only after teardown succeeds and the tree is safe to remove, the coordinator
@@ -309,7 +310,33 @@ The coordinator owns this sequence:
    deletes a checkout, forces Git removal or adopts resources of uncertain
    ownership.
 
-Both runners default to the current directory. Setup preserves per-worktree
+`workbench-worker-start` prints one JSON record with `status`, `pane`,
+`workspace`, `worktree`, `agent`, native `session`, `agentStatus`, `evidence`,
+`reason`, `fallback_reason`, `visible_blocker`, `diagnostics` and `ts`. Evidence is an ANSI-stripped pane tail of at
+most 40 lines, 240 characters per line and 4,096 UTF-8 bytes total. Runs of
+eight or more identical characters collapse to a short count marker. Diagnostics
+use the same bounds and carry setup errors or Herdr lifecycle facts separately
+(state, fallback reason, visible-state flags, manifest version and matched rule),
+without detector buffer previews. The pane also prints the human-readable,
+shell-quoted launcher command before starting it. Exit codes are 0 `started`, 10
+`blocked`, 11 `not-started`, 20 `launch-failed`, 30 `setup-failed`; argument errors are CLI
+misuse. Timeout is in seconds; unclassified startup or an undetected agent
+fails closed. A detected agent that never reaches working/blocked returns
+`not-started`, preserving its state and Herdr explanation fields. A returned
+shell or vanished pane is a launch failure. Herdr
+state recognition is authoritative: unrecognized trust/auth dialogs are not
+inferred from terminal text. The command never sends keys, answers prompts,
+retries a launch or cleans up resources. Inspect failures and escalate prompts.
+**Started is not accepted**: acceptance remains the worker's first acknowledging
+message to the coordinator. Keep that acceptance step separate.
+
+Known limitation (live-qualified with Herdr 0.9.5, Pi manifest 2026.10.01.1):
+Pi's project-trust UI is detected as `idle`, with
+`fallback_reason=default_known_agent_idle_fallback` and `visible_blocker=false`,
+not `blocked`. `not-started` plus the pane tail is the signal to inspect and
+escalate this prompt; no trust response is automated.
+
+Setup and teardown default to the current directory. Setup preserves per-worktree
 copies, isolated writable `.direnv`/`.devenv` state, and Git hooks. Declared
 submodules initialize recursively, before shell warm-up. Warm-up failure is a
 setup failure, not success with a warning. Rerunning setup is idempotent for
@@ -345,7 +372,7 @@ Configure `workbench.worktree` (or `agentic.worktree`):
   line. Hooks must verify actual resource absence, not merely command dispatch.
   A failure stops the runner; no declared teardown hooks succeeds with a note.
 
-`agentic.worktreeLib.{setupScript,hooksScript,teardownScript} pkgs` exposes the
+`agentic.worktreeLib.{setupScript,hooksScript,teardownScript,workerStartScript} pkgs` exposes the
 same runners and the Git-hook isolation helper. These are the supported APIs;
 legacy creator-specific traits and copy options warn and redirect to them.
 Legacy generation-only settings are ignored with warnings; delete them on a pin

@@ -66,6 +66,33 @@ adoption or force-removal.
 - **WHEN** a repository cleanup action fails or resource ownership cannot be established
 - **THEN** removal is withheld, evidence and resources are preserved, and the coordinator receives the blocker
 
+### Requirement: One structured worker startup observation
+Both shell transports SHALL provide `workbench-worker-start` for a coordinator's
+existing Herdr shell pane and worktree. It SHALL check repository setup and
+prompt-file readability before launching once without replacing the pane shell.
+It SHALL observe Herdr, not roster presence, and emit one JSON record containing
+status, resource binding, detected agent and native session when known, Herdr
+state, timestamp, and an ANSI-stripped pane tail of at most 40 lines. Only
+`started` SHALL exit zero. `blocked`, `not-started`, `launch-failed` and
+`setup-failed` SHALL have distinct nonzero exits. It MUST NOT answer prompts,
+send keys, retry launches or claim assignment acceptance.
+
+#### Scenario: Setup check fails
+- **WHEN** the repository setup check is missing, stale or failed
+- **THEN** startup returns `setup-failed` with the check message and launches nothing
+
+#### Scenario: Launcher exits before agent startup
+- **WHEN** the process exits back to its shell or the pane vanishes
+- **THEN** startup returns `launch-failed` with bounded available terminal evidence
+
+#### Scenario: Detected agent never becomes working or blocked
+- **WHEN** Herdr detects an agent but its state stays idle or unclassified until timeout
+- **THEN** startup returns `not-started` with its agent state, explanation fallback reason, visible-blocker flag and pane tail rather than inferring a trust response
+
+#### Scenario: Working agent is not yet an accepted assignment
+- **WHEN** Herdr observes the launched agent working
+- **THEN** startup returns `started` with its native session when known, and the coordinator still awaits the worker's acknowledging message
+
 ### Requirement: Recovery preserves attempt ownership
 Reconnect and continuation SHALL reconcile the actual session and resource
 bindings before creating or reassigning work. Duplicate/redelivered messages

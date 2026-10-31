@@ -191,6 +191,8 @@
         '';
     });
 
+  workerStartScript = import ./_worker-start.nix;
+
   teardownScript = pkgs:
     pkgs.writeShellApplication {
       name = "workbench-worktree-teardown";
@@ -259,7 +261,7 @@ in {
   options.agentic.worktreeLib = lib.mkOption {
     type = lib.types.raw;
     readOnly = true;
-    description = "Creator-neutral setupScript pkgs, hooksScript pkgs (isolated Git hooks), and teardownScript pkgs.";
+    description = "Creator-neutral setupScript pkgs, hooksScript pkgs (isolated Git hooks), teardownScript pkgs, and workerStartScript pkgs.";
   };
-  config.agentic.worktreeLib = {inherit setupScript hooksScript teardownScript;};
+  config.agentic.worktreeLib = {inherit setupScript hooksScript teardownScript workerStartScript;};
 }
