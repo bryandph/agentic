@@ -7,6 +7,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createMcpAdapter } from "./index.ts";
 import { loadGlobalMcpConfig, loadMcpConfig } from "./config.ts";
+import { logger } from "./logger.ts";
+import { createRequiredMcpWarning, readRequiredMcpServers } from "./requirements.ts";
 
 /** Pi 0.85.1 returns true without consulting trust when only .mcp.json exists.
  * Use Pi's own store for that case, never create another trust database.
@@ -28,9 +30,14 @@ export function projectConfigTrusted(ctx: ExtensionContext): boolean {
 export default function agenticMcp(pi: ExtensionAPI) {
   // Initial registration sees global files only. The resolver runs afresh for
   // every session, including hosts that retain this extension across cwd changes.
+  let warnRequired = createRequiredMcpWarning([]);
   createMcpAdapter({
     config: loadGlobalMcpConfig(),
+    onSessionReady(ctx, availability) {
+      warnRequired(ctx, availability, message => logger.warn(message));
+    },
     resolveSessionConfig(ctx) {
+      warnRequired = createRequiredMcpWarning(readRequiredMcpServers());
       if (projectConfigTrusted(ctx)) {
         return loadMcpConfig(pi.getFlag("mcp-config") as string | undefined, ctx.cwd);
       }
