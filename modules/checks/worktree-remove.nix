@@ -24,14 +24,15 @@
     bad = fixture ["echo cleanup failed; exit 1"];
     skipped = fixture ["echo verified: resources absent; echo skipped: unavailable"];
   in {
-    checks.worktree-remove = pkgs.runCommand "workbench-worktree-remove-fixtures" {
-      nativeBuildInputs = [pkgs.python3 pkgs.git];
-    } ''
-      python3 ${./_worktree-remove.py} \
-        ${good.removeScript pkgs}/bin/workbench-worktree-remove \
-        ${good.teardownScript pkgs}/bin/workbench-worktree-teardown \
-        ${bad.teardownScript pkgs}/bin/workbench-worktree-teardown \
-        ${skipped.teardownScript pkgs}/bin/workbench-worktree-teardown > "$out"
-    '';
+    checks.worktree-remove =
+      pkgs.runCommand "workbench-worktree-remove-fixtures" {
+        nativeBuildInputs = [pkgs.python3 pkgs.git];
+      } ''
+        python3 ${./_worktree-remove.py} \
+          ${good.removeScript pkgs}/bin/workbench-worktree-remove \
+          ${good.teardownScript pkgs}/bin/workbench-worktree-teardown \
+          ${bad.teardownScript pkgs}/bin/workbench-worktree-teardown \
+          ${skipped.teardownScript pkgs}/bin/workbench-worktree-teardown > "$out"
+      '';
   };
 }

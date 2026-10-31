@@ -102,6 +102,13 @@ def fixture(name, *, hook=good, agent="done", main=False, sub=False, dirty=None,
     assert not result.stderr, result.stderr
     data = json.loads(result.stdout)
     calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert calls[:2] == [["worktree", "list", "--cwd", str(cwd)], ["workspace", "get", "fixture"]], calls
+    if main or dirty or mismatch or foreign:
+        assert data["teardown"]["status"] == "not-run", data
+        assert not any(call[:2] == ["agent", "list"] for call in calls), calls
+    elif agent != "done":
+        assert data["teardown"]["status"] == "not-run", data
+        assert [call for call in calls if call[:2] == ["agent", "list"]] == [["agent", "list"]], calls
     removals = [call for call in calls if call[:2] == ["worktree", "remove"]]
     success = hook == good and agent == "done" and not (main or dirty or mismatch or foreign or refuse)
     assert data["status"] == ("removed" if success else "refused"), data
