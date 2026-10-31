@@ -1,7 +1,7 @@
 {
   # WORKFLOW-ONLY ADOPTION: this flake touches ONLY the dev shell — it
   # delivers the agentic workflow artifacts (MCP config, agent dirs,
-  # knowledge memories, generated .workmux.yaml) and optionally extra
+  # knowledge memories, creator-neutral worktree setup) and optionally extra
   # tools. Your existing build (cargo, make, whatever) is untouched and
   # keeps working for collaborators who never enter the shell.
   description = "Agentic workflow shell (adoption mode — build untouched)";

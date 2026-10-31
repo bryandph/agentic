@@ -9,7 +9,7 @@
   flake.templates = rec {
     default = {
       path = ../templates/default;
-      description = "Workflow-complete project: devenv + agentic registry (MCP, agents, knowledge, workmux) + openspec scaffold";
+      description = "Workflow-complete project: devenv + agentic registry (MCP, agents, knowledge, worktree setup) + openspec scaffold";
     };
     rust = {
       path = ../templates/rust;

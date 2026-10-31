@@ -50,7 +50,7 @@ in {
     ./modules/registry/_agents.nix
     ./modules/registry/_memory-plane.nix
     ./modules/registry/_worktree.nix
-    ./modules/registry/_workmux.nix
+    ./modules/registry/_worktree-compat.nix
     ./modules/registry/_bootstrap.nix
     ./modules/registry/_core-fragments.nix
     ./modules/_git-hooks/devenv.nix

@@ -346,12 +346,15 @@ Configure `workbench.worktree` (or `agentic.worktree`):
   A failure stops the runner; no declared teardown hooks succeeds with a note.
 
 `agentic.worktreeLib.{setupScript,hooksScript,teardownScript} pkgs` exposes the
-same runners and the Git-hook isolation helper. During this additive stage,
-`agentic.workmux.{traits,copyFiles}` and `agentic.workmuxLib.*` remain silent
-compatibility aliases; `worktreeHooksScript` still names the Git helper.
-`agentic-worktree-setup` remains an executable alias. Generated
-`.workmux.yaml` and the Claude `WorktreeCreate` hook both call the canonical
-setup command; no Workmux functionality is removed.
+same runners and the Git-hook isolation helper. These are the supported APIs;
+legacy creator-specific traits and copy options warn and redirect to them.
+Legacy generation-only settings are ignored with warnings; delete them on a pin
+bump. They no longer generate artifacts or affect coordinator behavior.
+`agentic-worktree-setup` remains an executable alias. The Claude
+`WorktreeCreate` hook and coordinator-created Herdr worktrees use the same
+canonical setup command. No creator configuration is generated or installed.
+The contributor shell also supplies both runners from this repository's own
+registry configuration.
 
 #### Setup result and check codes
 

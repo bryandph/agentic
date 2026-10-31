@@ -67,14 +67,8 @@
     };
     setup = "${good.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup";
     teardown = "${good.worktreeLib.teardownScript pkgs}/bin/workbench-worktree-teardown";
-    compatible =
-      good.workmux.traits
-      == good.worktree.traits
-      && good.workmux.copyFiles == good.worktree.copyFiles
-      && good.workmuxLib.setupScript pkgs == good.worktreeLib.setupScript pkgs
-      && good.workmuxLib.worktreeHooksScript pkgs == good.worktreeLib.hooksScript pkgs;
   in {
-    checks.worktree-setup = assert compatible;
+    checks.worktree-setup =
       pkgs.runCommand "workbench-worktree-setup-fixtures" {
         nativeBuildInputs = [pkgs.nix pkgs.git pkgs.jq pkgs.coreutils pkgs.gnugrep pkgs.bashInteractive] ++ lib.optional pkgs.stdenv.isDarwin fixtureDevenv;
       } ''

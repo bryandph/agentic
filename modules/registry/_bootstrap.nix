@@ -8,7 +8,7 @@
 # module also links Pi's native `.pi/mcp.json` to the same project-tier
 # MCP artifact because Pi does not read Claude's root-level filename,
 # then idempotently places agent directories, the generated `.serena/project.yml` +
-# read-only memory namespace, the generated `.workmux.yaml`, and the
+# read-only memory namespace and the
 # http-secret exports. `AGENTS.md`/`CLAUDE.md` are committed artifacts,
 # never shell-entry placements.
 #
@@ -78,10 +78,6 @@
     ${acfg.agentsLib.placeScript pkgs}
     # Knowledge memory plane: generated namespace + project.yml.
     ${acfg.memoryPlane.lib.placeScript pkgs}
-    # Generated workmux config — a real file (not a symlink): workmux
-    # reads the main worktree's copy during merges, and the header
-    # carries the operational rationale.
-    install -m 644 ${acfg.workmuxLib.configFile pkgs} .workmux.yaml
     # Work tracking: core-owned Backlog.md project config.
     ${acfg.workTracking.lib.placeScript pkgs}
     ${lib.optionalString (acfg.secrets.backend == "secretspec" && acfg.secrets.managedEnvironment != []) ''
@@ -120,8 +116,8 @@ in {
       packages = acfg.devenvLib.packages pkgs;
       enterShell = bootstrapScript pkgs;
       # One worktree setup path for ALL creators (agentic-devenv spec):
-      # Claude Code's native worktrees run the SAME script the generated
-      # .workmux.yaml post_create runs. Wired through devenv's
+      # Claude Code's native worktrees run the SAME creator-neutral
+      # setup command as coordinator-created worktrees. Wired through devenv's
       # first-party claude.code integration; takes effect when the
       # consumer enables claude.code.
       claude.code.hooks.agentic-worktree-setup = {

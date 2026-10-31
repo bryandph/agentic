@@ -332,7 +332,7 @@
       assert lib.hasInfix scopeLine p.builderPi;
       assert lib.hasInfix "File edits: permitted" p.builderPi;
       assert lib.hasInfix "File edits: not permitted" p.reviewerPi;
-      assert lib.hasInfix "workmux owns" p.builderPi;
+      assert lib.hasInfix "herdr worktree create" p.builderPi;
       assert lib.hasInfix "$ARGUMENTS" p.builderPi;
       # Negative cases.
       assert oversizedFails;
