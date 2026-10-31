@@ -387,7 +387,7 @@ bump. They no longer generate artifacts or affect coordinator behavior.
 `agentic-worktree-setup` remains an executable alias. The Claude
 `WorktreeCreate` hook and coordinator-created Herdr worktrees use the same
 canonical setup command. No creator configuration is generated or installed.
-The contributor shell also supplies all three runners from this repository's own
+The contributor shell also supplies all four runners from this repository's own
 registry configuration.
 
 #### Setup result and check codes

@@ -25,8 +25,12 @@ Follow your coordinator persona for escalation policy and authorization.
    `git worktree add` or `herdr workspace create`.
 4. Run `workbench-worktree-setup --worktree <path>` with the returned path.
    A non-zero exit is a stop: retain the diagnostics and escalate before
-   dispatching work. A successful setup does not prove worker readiness;
-   verify readiness through the actual harness before handing over the task.
+   dispatching work. A successful setup does not prove worker readiness.
+5. Start the selected worker in the returned, available shell pane:
+   `workbench-worker-start --pane <pane> --worktree <path> --timeout 30 -- <launcher> --prompt-file <file>`.
+   Inspect its JSON result and escalate blocked or failed startup; do not
+   answer prompts or retry blindly. Herdr startup evidence is not assignment
+   acceptance: wait separately for the worker's first acknowledgement.
 
 ## Remove
 
