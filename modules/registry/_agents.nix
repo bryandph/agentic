@@ -349,7 +349,7 @@
     builtins.seq (validateAgent name agent) (lib.concatStringsSep "\n" (map (fname: (cfg.knowledgeLib.fragment fname).text) agent.fragments)
       + "\n"
       + scopeSentences agent
-      + lib.optionalString (validatedMcp != []) "Required for this role: ${lib.concatStringsSep ", " (map (s: "`${s}`") validatedMcp)}.\n"
+      + lib.optionalString (validatedMcp != []) "MCP servers required for this role: ${lib.concatStringsSep ", " (map (s: "`${s}`") validatedMcp)}.\n"
       + capabilitySentences agent
       + lib.optionalString (agent.cotal.escalateTo != null) "Send decisions and escalations to the peer with Cotal role `${cfg.agents.${agent.cotal.escalateTo}.cotal.role}`; find that peer on the roster by role because presence names change on restart.\n");
   renderCotal = name: agent: let

@@ -207,7 +207,7 @@
       assert lib.hasInfix "Operate only within: `modules/`." relayBody;
       assert lib.hasInfix scopeLine relayBody;
       assert lib.hasInfix "If a task crosses out of this scope, hand off to: reviewer." relayBody;
-      assert lib.hasInfix "Required for this role: `serena`." relayBody;
+      assert lib.hasInfix "MCP servers required for this role: `serena`." relayBody;
       assert lib.hasInfix "File edits: permitted." relayBody;
       assert lib.hasInfix "Shell commands: permitted." relayBody;
       assert lib.hasInfix "Web access: not permitted." relayBody;
