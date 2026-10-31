@@ -8,7 +8,8 @@ import sys
 import tempfile
 
 remove, good, bad, skipped = sys.argv[1:]
-root = Path(tempfile.mkdtemp())
+# macOS /tmp is /private/tmp; compare Herdr's canonical checkout paths.
+root = Path(tempfile.mkdtemp()).resolve()
 os.environ.update(HOME=str(root / "home"), GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null")
 (root / "home").mkdir()
 
