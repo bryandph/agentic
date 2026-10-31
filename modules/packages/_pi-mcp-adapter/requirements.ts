@@ -17,21 +17,35 @@ export function readRequiredMcpServers(path = process.env.COTAL_AGENT_FILE): str
   }
 }
 
-export function missingMcpServers(required: readonly string[], connected: readonly string[]): string[] {
-  const live = new Set(connected);
-  return [...new Set(required)].filter(name => !live.has(name));
+export interface McpAvailability {
+  configured: string[];
+  disabled: string[];
+  failed: string[];
+  needsAuth: string[];
+}
+
+/** Lazy servers need not connect at startup: only known unavailability warns. */
+export function missingMcpServers(required: readonly string[], state: McpAvailability): string[] {
+  return [...new Set(required)].flatMap(name => {
+    const reason = !state.configured.includes(name) ? "not configured"
+      : state.disabled.includes(name) ? "disabled"
+      : state.needsAuth.includes(name) ? "needs auth"
+      : state.failed.includes(name) ? "failed"
+      : undefined;
+    return reason ? [`${reason}: ${name}`] : [];
+  });
 }
 
 /** One closure per session; observational only, including when UI/logging fails. */
 export function createRequiredMcpWarning(required: readonly string[]) {
   let checked = false;
-  return (ctx: { hasUI: boolean; ui: { notify(message: string, level: "warning"): void } }, connected: readonly string[], warn: (message: string) => void) => {
+  return (ctx: { hasUI: boolean; ui: { notify(message: string, level: "warning"): void } }, state: McpAvailability, warn: (message: string) => void) => {
     if (checked) return;
     checked = true;
     try {
-      const missing = missingMcpServers(required, connected);
+      const missing = missingMcpServers(required, state);
       if (!missing.length) return;
-      const message = `MCP: required servers not connected: ${missing.join(", ")}. Warning only; this session will continue.`;
+      const message = `MCP: required servers unavailable (${missing.join("; ")}). Warning only; this session will continue.`;
       if (ctx.hasUI) ctx.ui.notify(message, "warning");
       else warn(message);
     } catch {

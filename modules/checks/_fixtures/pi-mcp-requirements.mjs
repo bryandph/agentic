@@ -19,34 +19,46 @@ writeFileSync('persona.md', 'A plain persona without MCP requirements.');
 assert.deepEqual(readRequiredMcpServers(), []);
 delete process.env.COTAL_AGENT_FILE;
 assert.deepEqual(readRequiredMcpServers(), []);
-assert.deepEqual(missingMcpServers(['one', 'two', 'failed', 'two'], ['one', 'extra']), ['two', 'failed']);
 
+// Same snapshot as an initialized adapter with cached metadata: lazy servers
+// have config entries but no connection and no recorded failure. They are usable.
+const available = {configured: ['one', 'two'], disabled: [], failed: [], needsAuth: []};
+const unavailable = {configured: ['one', 'disabled', 'failed', 'auth'], disabled: ['disabled'], failed: ['failed'], needsAuth: ['auth']};
+assert.deepEqual(missingMcpServers(['one', 'two'], available), []);
+assert.deepEqual(missingMcpServers(['one', 'absent', 'disabled', 'failed', 'auth', 'failed'], unavailable), [
+  'not configured: absent', 'disabled: disabled', 'failed: failed', 'needs auth: auth',
+]);
 const notices = [], logs = [];
 const ctx = {hasUI: true, ui: {notify: (...args) => notices.push(args)}};
-const warn = createRequiredMcpWarning(['one', 'failed', 'absent']);
-warn(ctx, ['one'], message => logs.push(message));
-warn(ctx, [], message => logs.push(message));
-assert.equal(notices.length, 1);
-assert.equal(notices[0][1], 'warning');
-assert.match(notices[0][0], /failed, absent/);
-assert.match(notices[0][0], /Warning only; this session will continue/);
+const log = message => logs.push(message);
+const lazy = createRequiredMcpWarning(['one', 'two']);
+lazy(ctx, available, log);
+lazy(ctx, unavailable, log); // Checked once, even if the first check was silent.
+assert.equal(notices.length, 0);
+assert.equal(logs.length, 0);
+for (const [name, reason] of [['absent', 'not configured'], ['disabled', 'disabled'], ['failed', 'failed'], ['auth', 'needs auth']]) {
+  const once = createRequiredMcpWarning([name]);
+  once(ctx, unavailable, log);
+  once(ctx, unavailable, log);
+  assert.match(notices.at(-1)[0], new RegExp(`${reason}: ${name}`));
+  assert.match(notices.at(-1)[0], /Warning only; this session will continue/);
+  assert.equal(notices.at(-1)[1], 'warning');
+}
+assert.equal(notices.length, 4);
 assert.equal(logs.length, 0);
 const headless = {...ctx, hasUI: false};
-const nextSession = createRequiredMcpWarning(['one']);
-nextSession(headless, [], message => logs.push(message));
-nextSession(headless, [], message => logs.push(message));
+const nextSession = createRequiredMcpWarning(['absent']);
+nextSession(headless, unavailable, log);
+nextSession(headless, unavailable, log);
 assert.equal(logs.length, 1);
-assert.equal(notices.length, 1);
-createRequiredMcpWarning(['one'])(ctx, ['one'], () => assert.fail('unexpected warning'));
-createRequiredMcpWarning([])(ctx, [], () => assert.fail('unexpected warning'));
-assert.equal(notices.length, 1);
+assert.equal(notices.length, 4);
 for (const path of [undefined, '/nonexistent/persona.md', `${process.cwd()}/persona.md`]) {
   if (path === undefined) delete process.env.COTAL_AGENT_FILE;
   else process.env.COTAL_AGENT_FILE = path;
-  createRequiredMcpWarning(readRequiredMcpServers())(ctx, [], () => assert.fail('plain Pi must be silent'));
+  createRequiredMcpWarning(readRequiredMcpServers())(ctx, unavailable, () => assert.fail('plain Pi must be silent'));
 }
-assert.equal(notices.length, 1);
-assert.doesNotThrow(() => createRequiredMcpWarning(['one'])({hasUI: true, ui: {notify() {throw Error('UI failed');}}}, [], () => {}));
-assert.doesNotThrow(() => createRequiredMcpWarning(['one'])(headless, [], () => {throw Error('log failed');}));
-assert.doesNotThrow(() => createRequiredMcpWarning(['one'])(ctx, null, () => {}));
-console.log('MCP requirements: parser, renderCotal agreement, missing set, warning once/UI/headless/failure isolation passed');
+assert.equal(notices.length, 4);
+assert.doesNotThrow(() => createRequiredMcpWarning(['absent'])({hasUI: true, ui: {notify() {throw Error('UI failed');}}}, unavailable, log));
+assert.doesNotThrow(() => createRequiredMcpWarning(['absent'])(headless, unavailable, () => {throw Error('log failed');}));
+assert.doesNotThrow(() => createRequiredMcpWarning(['absent'])(ctx, null, log));
+console.log('MCP requirements: parser/renderCotal, lazy availability, missing/disabled/failed/auth reasons, warning once/UI/headless/silence/failure isolation passed');

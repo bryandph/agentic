@@ -33,8 +33,8 @@ export default function agenticMcp(pi: ExtensionAPI) {
   let warnRequired = createRequiredMcpWarning([]);
   createMcpAdapter({
     config: loadGlobalMcpConfig(),
-    onSessionConnected(ctx, connected) {
-      warnRequired(ctx, connected, message => logger.warn(message));
+    onSessionReady(ctx, availability) {
+      warnRequired(ctx, availability, message => logger.warn(message));
     },
     resolveSessionConfig(ctx) {
       warnRequired = createRequiredMcpWarning(readRequiredMcpServers());

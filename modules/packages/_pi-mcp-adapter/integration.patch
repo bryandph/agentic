@@ -39,7 +39,7 @@
      const initialization = startInitialization(ctx, owner, oauthRuntime, generation, "stale_session_start");
      if (envRaw !== undefined && envRaw !== "__none__") {
        const missingEnvDirectTools = getMissingConfiguredDirectToolServers(
-@@ -678,4 +689,16 @@
+@@ -678,4 +689,20 @@
          await initialization;
        }
      }
@@ -47,16 +47,20 @@
 +    void initialization.then(() => {
 +      if (generation !== lifecycleGeneration || !owner.isActive() || !state) return;
 +      try {
-+        const connected = [...state.manager.getAllConnections()]
-+          .filter(([, connection]) => connection.status === "connected")
-+          .map(([name]) => name);
-+        options.onSessionConnected?.(ctx, connected);
++        options.onSessionReady?.(ctx, {
++          configured: Object.keys(state.config.mcpServers),
++          disabled: Object.entries(state.config.mcpServers)
++            .filter(([, definition]) => definition.disabled === true).map(([name]) => name),
++          failed: [...state.failureTracker.keys()],
++          needsAuth: [...state.manager.getAllConnections()]
++            .filter(([, connection]) => connection.status === "needs-auth").map(([name]) => name),
++        });
 +      } catch {
 +        // Requirement discovery/status/reporting is best-effort only.
 +      }
 +    }).catch(() => {});
    });
-@@ -1229,13 +1252,16 @@
+@@ -1229,13 +1256,16 @@
    // eager call, the tool-groups expansion runs before MCP initialization
    // completes and emits false `[unknown-tool] mcp__<server>` diagnostics.
    syncNamespaceTools(earlyConfig, earlyCache, initialDirectResult.reservedDirectNames, initialDirectResult.activeDirectNames);
@@ -69,7 +73,7 @@
    return function mcpAdapter(pi: ExtensionAPI) {
      installMcpAdapter(pi, {
 +      ...(options.resolveSessionConfig !== undefined ? { resolveSessionConfig: options.resolveSessionConfig } : {}),
-+      ...(options.onSessionConnected !== undefined ? { onSessionConnected: options.onSessionConnected } : {}),
++      ...(options.onSessionReady !== undefined ? { onSessionReady: options.onSessionReady } : {}),
 +      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
        ...(options.configPath !== undefined ? { configPath: options.configPath } : {}),
        ...(factoryConfig !== undefined ? { config: cloneMcpConfig(factoryConfig) } : {}),
@@ -81,7 +85,7 @@
  
  export interface McpAdapterOptions {
 +  /** Agentic: best-effort observation after the session startup connect phase. */
-+  onSessionConnected?: (ctx: import("@earendil-works/pi-coding-agent").ExtensionContext, connected: string[]) => void;
++  onSessionReady?: (ctx: import("@earendil-works/pi-coding-agent").ExtensionContext, availability: { configured: string[]; disabled: string[]; failed: string[]; needsAuth: string[] }) => void;
 +  /** Agentic: isolated config, freshly authorized after previous session teardown.
 +   * Requires config to select upstream's programmatic (no ambient reads) mode.
 +   */
