@@ -57,8 +57,12 @@ grep -q '^\.\./' "$sub_registration/gitdir"
   "$isolate"
   prek install
 )
-! git config --file "$subdir/config" --get core.worktree
-git config --file "$subdir/config.worktree" --get core.worktree | grep -q '^\.\./'
+git config --file "$subdir/config" --get core.worktree | grep -q '^\.\./'
+test "$(git config --file "$sub_registration/config.worktree" --get core.worktree)" = "$TMPDIR/relative-sub"
+# Preserve doctor's coverage for gitdirs migrated by older helpers too.
+value="$(git config --file "$subdir/config" --get core.worktree)"
+git config --file "$subdir/config.worktree" core.worktree "$value"
+git config --file "$subdir/config" --unset core.worktree
 "$doctor" lookup-parent > migrated-clean
 "$doctor" relative-sub >> migrated-clean
 test ! -s migrated-clean
