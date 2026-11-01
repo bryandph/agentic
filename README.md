@@ -427,6 +427,14 @@ an existing affected worktree; entering its shell also repairs the Git setting
 if shell entry can reach the task. Setup is the recovery path when wrong Git
 resolution prevents shell entry. Neither action repairs other worktrees.
 
+Setup's early `fsmonitor` step disables `core.fsmonitor` only in the linked
+worktree's `config.worktree`, then stops that checkout's running daemon before
+Nix discovery. A remaining `fsmonitor--daemon.ipc` in its per-worktree gitdir
+fails setup at `fsmonitor`, with the socket path; setup never deletes sockets.
+Main checkouts, global fsmonitor settings, and `core.untrackedCache` are unchanged.
+The shell-entry hooks task shares the config pin only, not daemon management;
+rerun setup to stop an existing daemon before Nix evaluates the worktree.
+
 LAB-178: a recursive `git reset --hard` before submodule initialization can
 leave a config-only submodule gitdir. Setup detects this and fails closed at
 `submodule-stub`, naming the path without changing the stub or its checkout.
