@@ -298,6 +298,8 @@ expose `pi-agent-roles`, a package of specialist prompt templates compiled from
 the agent registry. See [Pi delivery](docs/pi.md) for ownership, native paths,
 compatibility, and targeted checks.
 
+Flake-parts integration defaults every devenv shell's `task.package` to the consumer's `inputs.devenv.packages.${system}.devenv-tasks` (no import-from-derivation); consumer overrides win, and missing inputs/packages warn and skip.
+
 ### Standalone self-healing Git hooks
 
 A devenv shell can opt into hook isolation and GC protection without the
