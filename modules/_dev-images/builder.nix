@@ -99,10 +99,17 @@
   };
   nixTools = with pkgs; [nix devenv direnv nix-direnv];
 
+  devImageSecretScan = pkgs.writeShellApplication {
+    name = "dev-image-secret-scan";
+    runtimeInputs = [pkgs.gnugrep];
+    text = builtins.readFile ./dev-image-secret-scan.sh;
+  };
+
   # Warm-image builder/publisher (design D9); also an app.
   devImageRepo = pkgs.writeShellApplication {
     name = "dev-image-repo";
     runtimeInputs = [
+      devImageSecretScan
       nix2container.skopeo-nix2container
       pkgs.crane
       pkgs.git
@@ -493,5 +500,5 @@
     text = builtins.readFile ./dev-image-publish.sh;
   };
 in {
-  inherit mkDevImage sharedImageCheck rule github publicSubstituters devVerify devImageRepo devImagePublish;
+  inherit mkDevImage sharedImageCheck rule github publicSubstituters devVerify devImageRepo devImagePublish devImageSecretScan;
 }

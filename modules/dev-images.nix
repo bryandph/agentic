@@ -42,6 +42,7 @@
       {
         dev-verify = images.devVerify;
         dev-image-repo = images.devImageRepo;
+        dev-image-secret-scan = images.devImageSecretScan;
         dev-image-publish = images.devImagePublish;
       }
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
