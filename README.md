@@ -431,8 +431,13 @@ resolution prevents shell entry. Neither action repairs other worktrees.
 
 Setup's early `fsmonitor` step disables `core.fsmonitor` only in the linked
 worktree's `config.worktree`, then stops that checkout's running daemon before
-Nix discovery. A remaining `fsmonitor--daemon.ipc` in its per-worktree gitdir
-fails setup at `fsmonitor`, with the socket path; setup never deletes sockets.
+Nix discovery, tolerating a stop race and waiting up to five seconds for exit.
+Setup probes only `fsmonitor--daemon.ipc` in that linked worktree's gitdir:
+a refused or missing connection permits removal of that stale socket only.
+Removal logs the path to stderr and records it as `fsmonitor.staleSocketRemoved`
+in `workbench-setup.json`. A live listener, non-socket file, or uncertain probe
+fails setup at `fsmonitor` with the path, without removing it. Setup never touches
+the `fsmonitor--daemon/` directory or another checkout's sockets.
 Main checkouts, global fsmonitor settings, and `core.untrackedCache` are unchanged.
 The shell-entry hooks task shares the config pin only, not daemon management;
 rerun setup to stop an existing daemon before Nix evaluates the worktree.
