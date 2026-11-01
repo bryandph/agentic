@@ -1,12 +1,30 @@
 # Flake-parts publication of the devenv shell module (design D6/D9).
 # The actual bootstrap lives transport-neutral in
 # modules/registry/_bootstrap.nix (`agentic.devenvLib.shellModule`);
-# this file only publishes it into the consumer's namespace for the
-# flake-parts transport (`devenv.shells.<name>.imports`). The
-# devenv-native transport wires the same shellModule via the shim at
-# /devenv.nix.
+# the devenv-native transport wires that shellModule via /devenv.nix and
+# resolves its task runner itself, without this flake-parts adapter.
 {
-  flake.modules.flake.agentic = {config, ...}: {
+  flake.modules.flake.agentic = {
+    config,
+    inputs,
+    lib,
+    ...
+  }: {
     flake.modules.devenv.agentic = config.agentic.devenvLib.shellModule;
+
+    perSystem = {system, ...}:
+      if !(inputs ? devenv)
+      then lib.warn "agentic: no consumer devenv input; skipping the non-IFD task.package default" {}
+      else if !(lib.hasAttrByPath ["devenv" "packages" system "devenv-tasks"] inputs)
+      then lib.warn "agentic: consumer devenv lacks packages.${system}.devenv-tasks; skipping the non-IFD task.package default" {}
+      else {
+        # Use the consumer's input, not an agentic pin: the task runner must
+        # match the version of devenv's modules evaluating the consumer shells.
+        # devenv.modules is the flake-parts hook applied to EVERY shell, even
+        # shells which do not import flake.modules.devenv.agentic themselves.
+        devenv.modules = [
+          {task.package = lib.mkDefault inputs.devenv.packages.${system}.devenv-tasks;}
+        ];
+      };
   };
 }
