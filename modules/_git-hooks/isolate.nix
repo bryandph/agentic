@@ -29,7 +29,6 @@ pkgs.writeShellApplication {
       fi
       file_config "$common_dir/config" extensions.worktreeConfig true
     fi
-    ${import ./_fsmonitor-config.nix}
     if [ "$(git config --worktree --get core.hooksPath || true)" != "$git_dir/hooks" ]; then
       git config --worktree core.hooksPath "$git_dir/hooks"
     fi
