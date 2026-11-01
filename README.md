@@ -414,6 +414,19 @@ submodules initialize recursively, before shell warm-up. Warm-up failure is a
 setup failure, not success with a warning. Rerunning setup is idempotent for
 unchanged repository inputs; repository hooks must also be safe to repeat.
 
+For a linked worktree of a submodule, setup's `worktree-config` step pins
+`core.worktree` to that checkout's absolute path in its own
+`<common-gitdir>/worktrees/<name>/config.worktree`, before Nix discovery or
+submodule initialization. It enables `extensions.worktreeConfig` and leaves
+the parent's shared `core.worktree` untouched, so later parent
+`git submodule update` calls cannot redirect the linked checkout. Already-migrated
+main `config.worktree` values from older helpers remain supported. The
+`agentic:worktree-hooks` devenv task applies the same pin on every shell entry.
+After updating agentic, rerun `workbench-worktree-setup --worktree <path>` for
+an existing affected worktree; entering its shell also repairs the Git setting
+if shell entry can reach the task. Setup is the recovery path when wrong Git
+resolution prevents shell entry. Neither action repairs other worktrees.
+
 LAB-178: a recursive `git reset --hard` before submodule initialization can
 leave a config-only submodule gitdir. Setup detects this and fails closed at
 `submodule-stub`, naming the path without changing the stub or its checkout.
