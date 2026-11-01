@@ -18,14 +18,15 @@
         printf '%s\n' "$*" >> "$DAEMON_LOG"
         case "''${*: -1}" in
           status) case "$DAEMON_MODE" in
-            running|remains) exit 0 ;;
+            running|race|stuck) [ -f "$DAEMON_STATE" ] || exit 0; exit 1 ;;
             missing) exit 128 ;;
             *) exit 1 ;;
           esac ;;
           stop)
-            if [ "$DAEMON_MODE" = running ]; then
-              rm "$DAEMON_SOCKET"
-              echo stopped > "$DAEMON_STATE"
+            if [ "$DAEMON_MODE" != stuck ]; then echo stopped > "$DAEMON_STATE"; fi
+            if [ "$DAEMON_MODE" = race ]; then
+              echo 'fatal: fsmonitor daemon not running' >&2
+              exit 1
             fi
             exit 0 ;;
         esac
