@@ -25,6 +25,8 @@
               packages = {
                 worktree-setup = config.agentic.worktreeLib.setupScript pkgs;
                 worktree-hooks = config.agentic.worktreeLib.hooksScript pkgs;
+                worktree-teardown = config.agentic.worktreeLib.teardownScript pkgs;
+                worktree-remove = config.agentic.worktreeLib.removeScript pkgs;
               };
             };
           })
@@ -33,6 +35,7 @@
 
     submoduleRepo = mkFixture {
       agentic.worktree.traits.submodules = true;
+      agentic.worktree.teardownHooks = ["echo verified: fixture resources absent"];
     };
 
     financeShape = mkFixture {
@@ -42,9 +45,20 @@
     pkgOf = fixture: name: fixture.packages.${system}.${name};
     hooksHelper = pkgOf submoduleRepo "worktree-hooks";
   in {
-    # A linked worktree of a SUBMODULE: the helper must move the shared
-    # core.worktree into the main worktree's config.worktree before
-    # enabling extensions.worktreeConfig, so both checkouts still resolve.
+    checks.submodule-worktree =
+      pkgs.runCommand "agentic-submodule-worktree" {
+        nativeBuildInputs = [pkgs.git pkgs.python3];
+      } ''
+        python3 ${./_submodule-worktree.py} \
+          ${hooksHelper}/bin/agentic-worktree-hooks \
+          ${pkgOf submoduleRepo "worktree-setup"}/bin/workbench-worktree-setup \
+          ${pkgOf submoduleRepo "worktree-teardown"}/bin/workbench-worktree-teardown \
+          ${pkgOf submoduleRepo "worktree-remove"}/bin/workbench-worktree-remove \
+          ${import ../_git-hooks/package.nix pkgs}/bin/agentic-hooks-doctor > "$out"
+      '';
+
+    # Without the extension enabled yet, preserve the parent's shared value
+    # and enable per-worktree config with the linked checkout pinned.
     checks.worktree-hooks =
       pkgs.runCommand "agentic-worktree-hooks" {
         nativeBuildInputs = [pkgs.git];
@@ -69,8 +83,8 @@
         ! git config --file "$common/config" --get extensions.worktreeConfig
 
         (cd sub-wt && ${hooksHelper}/bin/agentic-worktree-hooks)
-        ! git config --file "$common/config" --get core.worktree
-        git config --file "$common/config.worktree" --get core.worktree >/dev/null
+        git config --file "$common/config" --get core.worktree >/dev/null
+        test ! -e "$common/config.worktree"
         test "$(git config --file "$common/config" --get extensions.worktreeConfig)" = true
         wt_git="$(git -C sub-wt rev-parse --absolute-git-dir)"
         test "$(git -C sub-wt config --worktree --get core.hooksPath)" = "$wt_git/hooks"
@@ -82,9 +96,9 @@
         test "$(git -C super/sub rev-parse --path-format=absolute --git-path hooks)" = "$common/hooks"
 
         # Idempotent.
-        before="$(cat "$common/config" "$common/config.worktree")"
+        before="$(cat "$common/config" "$wt_git/config.worktree")"
         (cd sub-wt && ${hooksHelper}/bin/agentic-worktree-hooks)
-        test "$before" = "$(cat "$common/config" "$common/config.worktree")"
+        test "$before" = "$(cat "$common/config" "$wt_git/config.worktree")"
         touch $out
       '';
 

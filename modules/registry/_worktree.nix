@@ -39,11 +39,11 @@
           worktree="''${1:-$PWD}"
           # Setup applies to linked worktrees only: a main checkout or a
           # directory outside any repository has no record by design.
-          if ! git_dir="$(git -C "$worktree" -c submodule.recurse=false rev-parse --absolute-git-dir 2>/dev/null)"; then
+          if ! git_dir="$(GIT_WORK_TREE="$PWD" git -C "$worktree" -c submodule.recurse=false rev-parse --absolute-git-dir 2>/dev/null)"; then
             printf 'worktree %s: not a git repository; worktree setup does not apply\n' "$worktree" >&2
             exit 4
           fi
-          common_dir="$(git -C "$worktree" -c submodule.recurse=false rev-parse --path-format=absolute --git-common-dir)"
+          common_dir="$(GIT_WORK_TREE="$PWD" git -C "$worktree" -c submodule.recurse=false rev-parse --path-format=absolute --git-common-dir)"
           if [ "$git_dir" = "$common_dir" ]; then
             printf 'worktree %s: main checkout, not a linked worktree; worktree setup does not apply\n' "$worktree" >&2
             exit 4
@@ -65,7 +65,9 @@
           exit "$code"
         fi
         ${arguments}
-        git_dir="$(git -c submodule.recurse=false rev-parse --absolute-git-dir)"
+        # Metadata discovery must survive an invalid inherited core.worktree;
+        # the helper below derives the actual checkout from its registration.
+        git_dir="$(GIT_WORK_TREE="$PWD" git -c submodule.recurse=false rev-parse --absolute-git-dir)"
         started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         step=discovery
         warm_result=not-run warm_status=null
@@ -86,6 +88,10 @@
         }
         trap finish EXIT
 
+        # Repair Git's checkout resolution before Nix or submodule commands.
+        step='worktree-config'
+        ${hooksScript pkgs}/bin/agentic-worktree-hooks
+        step=discovery
         # Probe before artifact placement: Nix may not discover linked submodules.
         if ! nix flake metadata --json >/dev/null 2>&1; then
           if [ -f .git ] && grep -q '\.git/modules/' .git 2>/dev/null; then

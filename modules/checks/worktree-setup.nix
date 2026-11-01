@@ -241,9 +241,21 @@
         ${setup} --worktree "$TMPDIR/two"
         one_git=$(git -C one rev-parse --absolute-git-dir)
         two_git=$(git -C two rev-parse --absolute-git-dir)
-        # A linked worktree of an initialized submodule exercises the double
-        # gitdir indirection, including core.worktree migration and recursion.
-        git -C two/sub worktree add -b linked-sub "$TMPDIR/linked-sub" HEAD
+        # Reproduce a parent-owned shared core.worktree with the extension
+        # already enabled, and create via gitdir just like submodule tooling.
+        sub_common="$(git -C two/sub rev-parse --absolute-git-dir)"
+        git config --file "$sub_common/config" extensions.worktreeConfig true
+        git --git-dir "$sub_common" worktree add -b linked-sub "$TMPDIR/linked-sub" HEAD
+        # Depending on the depth of the gitdir, the inherited relative value
+        # either resolves elsewhere or fails because its destination is absent.
+        before_top="$(git -C linked-sub rev-parse --show-toplevel 2>/dev/null || true)"
+        test "$before_top" != "$TMPDIR/linked-sub"
+        ${setup} --worktree "$TMPDIR/linked-sub"
+        expect_check 0 "$TMPDIR/linked-sub"
+        test "$(git -C linked-sub rev-parse --show-toplevel)" = "$TMPDIR/linked-sub"
+        git -C two submodule sync --recursive
+        git -C two submodule update --init --recursive
+        test "$(git -C linked-sub rev-parse --show-toplevel)" = "$TMPDIR/linked-sub"
         ${setup} --worktree "$TMPDIR/linked-sub"
         expect_check 0 "$TMPDIR/linked-sub"
         test "$(cat linked-sub/nested/data)" = nested-data
