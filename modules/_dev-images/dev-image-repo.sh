@@ -135,8 +135,8 @@ for sys in $systems; do
   # 3. No secrets (spec: Warm images carry no secrets). Content-based: the
   # closure legitimately holds `*-secrets` runner scripts that resolve
   # credentials from OpenBao at runtime, so store-path names prove nothing.
-  # Refuse SOPS-encrypted values (every SOPS format wraps them as
-  # ENC[AES256_GCM,...]) and age secret keys or armored age files. PEM
+  # Refuse SOPS-encrypted values (the authenticated-encryption envelope),
+  # age secret keys or armored age files. PEM
   # headers are not checked: upstream parsers, docs and test fixtures in a
   # typical closure carry them by design (110 hits in nixspace's, none ours).
   # Scan what could hold our secrets: the build environment and the private
@@ -155,8 +155,7 @@ for sys in $systems; do
   closure=$(nix-store -qR "${scan[@]}")
   # Captured rather than piped through head: under pipefail an early-closed
   # pipe would report "no match" for a closure that has one.
-  hits=$(xargs grep -rIl -e 'ENC\[AES256_GCM,' -e 'AGE-SECRET-KEY-1' \
-    -e 'BEGIN AGE ENCRYPTED FILE' <<< "$closure" || true)
+  hits=$(xargs dev-image-secret-scan <<< "$closure" || true)
   if [ -n "$hits" ]; then
     printf '%s\n' "$hits" | sed -n '1,10p' >&2
     echo "dev-image-repo: secret material in the $sys closure; refusing" >&2
