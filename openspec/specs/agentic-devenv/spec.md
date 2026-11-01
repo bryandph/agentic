@@ -63,6 +63,18 @@ NOT carry divergent copies of setup logic or require Workmux to invoke it.
 - **WHEN** repository preparation fails
 - **THEN** the creator exposes the setup failure before launching a worker and does not treat a workspace-created event as setup completion
 
+#### Scenario: linked worktrees disable fsmonitor without changing the main checkout
+- **WHEN** setup prepares a linked worktree whose main checkout inherits `core.fsmonitor=true`
+- **THEN** it enables per-worktree configuration and pins `core.fsmonitor=false` directly in the linked worktree's own `config.worktree`, without changing the global setting, the main checkout's fsmonitor setting, or `core.untrackedCache`
+- **AND** before Nix discovery or submodule initialization, the named `fsmonitor` step stops only that checkout's running daemon, tolerating a not-running stop race or an unavailable builtin, and waits at most five seconds before failing if status still reports running
+- **AND** it probes only `fsmonitor--daemon.ipc` in that linked gitdir with a Unix-socket connection; connection refused or no such socket permits removal only of a socket file, while a listener, non-socket file, or uncertain probe fails at `fsmonitor` with the path without removing it
+- **AND** stale socket removal logs `removed stale fsmonitor socket <path> (no listener)` to stderr and records the path in `workbench-setup.json` under `fsmonitor.staleSocketRemoved`; setup asserts the socket is gone and never touches `fsmonitor--daemon/`, the common gitdir's sockets, or another worktree's sockets
+- **AND** repeating setup preserves the same configuration; the shell-entry hooks task shares only the config pin, not daemon handling
+
+#### Scenario: fsmonitor setup does not apply to the main checkout
+- **WHEN** setup runs in a main checkout rather than a linked worktree
+- **THEN** it neither pins fsmonitor nor probes or stops that checkout's daemon
+
 ### Requirement: Worktree-aware bootstrap
 Bootstrap SHALL handle Git worktree indirection. It MUST NOT assume `.git` is a
 directory. It SHALL resolve a `.git` file that points into a linked-worktree

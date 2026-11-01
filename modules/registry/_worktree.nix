@@ -29,7 +29,7 @@
   setupScript = pkgs:
     (pkgs.writeShellApplication {
       name = "workbench-worktree-setup";
-      runtimeInputs = [pkgs.git pkgs.jq pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils];
+      runtimeInputs = [pkgs.git pkgs.jq pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils pkgs.python3];
       text = ''
         setup_command="${builtins.placeholder "out"}/bin/workbench-worktree-setup"
         if [ "''${1:-}" = --check ]; then
@@ -71,6 +71,7 @@
         started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         step=discovery
         warm_result=not-run warm_status=null
+        stale_socket_removed=""
         finish() {
           result=$?
           trap - EXIT
@@ -80,8 +81,8 @@
           jq -n --arg status "$status" --arg step "$failed_step" \
             --arg warm "$warm_result" --argjson warmCode "$warm_status" \
             --arg start "$started_at" --arg finish "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg command "$setup_command" \
-            '{status: $status, failedStep: (if $step == "" then null else $step end), warmUp: {status: $warm, exitCode: $warmCode}, startedAt: $start, finishedAt: $finish, setupCommand: $command}' > "$record_tmp"
+            --arg command "$setup_command" --arg staleSocket "$stale_socket_removed" \
+            '{fsmonitor: {staleSocketRemoved: (if $staleSocket == "" then null else $staleSocket end)}, status: $status, failedStep: (if $step == "" then null else $step end), warmUp: {status: $warm, exitCode: $warmCode}, startedAt: $start, finishedAt: $finish, setupCommand: $command}' > "$record_tmp"
           mv -f "$record_tmp" "$git_dir/workbench-setup.json"
           if [ "$result" != 0 ] && [ "$step" != submodule-stub ]; then echo "worktree $worktree: setup failed at $step; see $git_dir/workbench-setup.json" >&2; fi
           exit "$result"
@@ -91,6 +92,39 @@
         # Repair Git's checkout resolution before Nix or submodule commands.
         step='worktree-config'
         ${hooksScript pkgs}/bin/agentic-worktree-hooks
+        step=fsmonitor
+        common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+        if [ "$git_dir" != "$common_dir" ]; then
+          # worktree-config enabled extensions.worktreeConfig above. Address
+          # this gitdir directly, never the common or global fsmonitor setting.
+          file_config() { git config --file "$@"; }
+          ${import ../_git-hooks/_fsmonitor-config.nix}
+          # Status is a probe: not-running and Git builds without the builtin
+          # are both harmless. Stop only this checkout's running daemon.
+          if git -C "$worktree" fsmonitor--daemon status >/dev/null 2>&1; then
+            if ! stop_output="$(git -C "$worktree" fsmonitor--daemon stop 2>&1)"; then
+              # The daemon may exit between status and stop after the pin.
+              if [[ "$stop_output" != *'not running'* ]]; then
+                printf 'worktree %s: fsmonitor stop failed: %s\n' "$worktree" "$stop_output" >&2
+                exit 1
+              fi
+            fi
+          fi
+          for ((attempt = 0; attempt < 50; attempt++)); do
+            if ! git -C "$worktree" fsmonitor--daemon status >/dev/null 2>&1; then break; fi
+            sleep 0.1
+          done
+          if git -C "$worktree" fsmonitor--daemon status >/dev/null 2>&1; then
+            printf 'worktree %s: fsmonitor daemon still running after 5 seconds\n' "$worktree" >&2
+            exit 1
+          fi
+          socket="$git_dir/fsmonitor--daemon.ipc"
+          stale_socket_removed="$(python3 ${./_fsmonitor-socket.py} "$socket")"
+          if [ -e "$socket" ] || [ -L "$socket" ]; then
+            printf 'worktree %s: fsmonitor socket remains at %s\n' "$worktree" "$socket" >&2
+            exit 1
+          fi
+        fi
         step=discovery
         # Probe before artifact placement: Nix may not discover linked submodules.
         if ! nix flake metadata --json >/dev/null 2>&1; then
