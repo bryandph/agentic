@@ -47,24 +47,34 @@
         ["default" "another" "overridden"]
       );
 
-    # Missing inputs/outputs must skip without defining an unknown devenv
-    # option or accessing a missing system/package. Force the whole config.
-    skipped = devenvInputs: let
+    # Force the per-system outputs to catch unknown-option errors. Only an
+    # active flake integration with missing packages should emit a warning.
+    skipped = integration: devenvInputs: let
       result = inputs.flake-parts.lib.mkFlake {inputs = inputs // devenvInputs;} {
         systems = [system];
-        imports = [config.flake.flakeModules.default];
+        imports = [config.flake.flakeModules.default] ++ lib.optional integration devenv.flakeModule;
       };
     in
       builtins.attrNames result.devShells.${system} == [];
   in {
-    checks.devenv-tasks = assert valid;
-    assert skipped {};
-    assert skipped {devenv = {};};
-    assert skipped {devenv.packages.${system} = {};};
-    assert skipped {devenv.packages = {};};
-    assert skipped {devenv.packages.unsupported-system.devenv-tasks = pkgs.hello;};
-      pkgs.runCommand "agentic-devenv-tasks" {} ''
-        touch "$out"
-      '';
+    checks = {
+      devenv-tasks = assert valid;
+      assert skipped true {devenv = {};};
+      assert skipped true {devenv.packages.${system} = {};};
+      assert skipped true {devenv.packages = {};};
+      assert skipped true {devenv.packages.unsupported-system.devenv-tasks = pkgs.hello;};
+        pkgs.runCommand "agentic-devenv-tasks" {} ''
+          touch "$out"
+        '';
+
+      # Separate from the intentionally warning-producing cases so this can
+      # also be evaluated with `--option abort-on-warn true`.
+      devenv-tasks-no-integration = assert skipped false {};
+      assert skipped true {};
+      assert skipped false {inherit devenv;};
+        pkgs.runCommand "agentic-devenv-tasks-no-integration" {} ''
+          touch "$out"
+        '';
+    };
   };
 }
