@@ -72,6 +72,10 @@
         step=discovery
         warm_result=not-run warm_status=null
         stale_socket_removed=""
+        submodules_configured=${lib.boolToString cfg.traits.submodules}
+        submodules_initialized='[]'
+        submodules_excluded=${lib.escapeShellArg (builtins.toJSON cfg.submodules.exclude)}
+        submodules_skipped=null
         finish() {
           result=$?
           trap - EXIT
@@ -82,7 +86,9 @@
             --arg warm "$warm_result" --argjson warmCode "$warm_status" \
             --arg start "$started_at" --arg finish "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg command "$setup_command" --arg staleSocket "$stale_socket_removed" \
-            '{fsmonitor: {staleSocketRemoved: (if $staleSocket == "" then null else $staleSocket end)}, status: $status, failedStep: (if $step == "" then null else $step end), warmUp: {status: $warm, exitCode: $warmCode}, startedAt: $start, finishedAt: $finish, setupCommand: $command}' > "$record_tmp"
+            --argjson configured "$submodules_configured" --argjson initialized "$submodules_initialized" \
+            --argjson excluded "$submodules_excluded" --argjson skipped "$submodules_skipped" \
+            '{submodules: {configured: $configured, initialized: $initialized, excluded: $excluded, skipped: $skipped}, fsmonitor: {staleSocketRemoved: (if $staleSocket == "" then null else $staleSocket end)}, status: $status, failedStep: (if $step == "" then null else $step end), warmUp: {status: $warm, exitCode: $warmCode}, startedAt: $start, finishedAt: $finish, setupCommand: $command}' > "$record_tmp"
           mv -f "$record_tmp" "$git_dir/workbench-setup.json"
           if [ "$result" != 0 ] && [ "$step" != submodule-stub ]; then echo "worktree $worktree: setup failed at $step; see $git_dir/workbench-setup.json" >&2; fi
           exit "$result"
@@ -140,6 +146,42 @@
           exit 1
         fi
         main_wt="$(git -c submodule.recurse=false worktree list --porcelain | head -1 | sed 's/^worktree //')"
+        # Git's -z config output separates key and value with a newline and
+        # entries with NUL, preserving whitespace and glob characters in paths.
+        submodule_paths=() selected_paths=() excluded_paths=()
+        declared_exclusions=(${lib.escapeShellArgs cfg.submodules.exclude})
+        if [ -f .gitmodules ]; then
+          # A malformed file must not look like a repository with no entries.
+          git -c submodule.recurse=false config --file .gitmodules --list >/dev/null
+          while IFS= read -r -d "" entry; do
+            subpath="''${entry#*$'\n'}"
+            submodule_paths+=("$subpath")
+            excluded=false
+            for exclusion in "''${declared_exclusions[@]}"; do
+              if [ "$subpath" = "$exclusion" ]; then excluded=true; break; fi
+            done
+            if "$excluded"; then excluded_paths+=("$subpath"); else selected_paths+=("$subpath"); fi
+          done < <(git -c submodule.recurse=false config -z --file .gitmodules --get-regexp '^submodule\..*\.path$' || true)
+        else
+          submodules_skipped='"no-gitmodules"'
+        fi
+        observe_submodules() {
+          local subpath state
+          submodules_initialized='[]'
+          missing_paths=() unexpected_paths=()
+          for subpath in "''${submodule_paths[@]}"; do
+            state="$(git -c submodule.recurse=false submodule status -- ":(literal)$subpath")"
+            if [[ "$state" != -* ]] && [ -n "$state" ]; then
+              submodules_initialized="$(jq -c --arg path "$subpath" '. + [$path]' <<< "$submodules_initialized")"
+            fi
+          done
+          for subpath in "''${selected_paths[@]}"; do
+            if ! jq -e --arg path "$subpath" 'index($path) != null' <<< "$submodules_initialized" >/dev/null; then missing_paths+=("$subpath"); fi
+          done
+          for subpath in "''${excluded_paths[@]}"; do
+            if jq -e --arg path "$subpath" 'index($path) != null' <<< "$submodules_initialized" >/dev/null; then unexpected_paths+=("$subpath"); fi
+          done
+        }
         ${lib.optionalString cfg.traits.submodules ''
           # LAB-178: reset-before-init can leave config-only submodule gitdirs.
           # Detect without deleting, moving, or otherwise adopting their data.
@@ -159,21 +201,45 @@
               reject_stub "$candidate" "$checkout"
             done < <(find "$git_dir/modules" -type f -name config -print0)
           fi
-          if [ -f .gitmodules ]; then
-            while read -r _key subpath; do
-              if [ -f "$subpath/.git" ]; then
-                IFS= read -r gitfile < "$subpath/.git"
-                if [[ "$gitfile" = 'gitdir: '* ]]; then
-                  candidate="''${gitfile#gitdir: }"
-                  if [[ "$candidate" != /* ]]; then candidate="$(realpath -m "$subpath/$candidate")"; fi
-                  reject_stub "$candidate" "$worktree/$subpath"
-                fi
+          for subpath in "''${submodule_paths[@]}"; do
+            if [ -f "$subpath/.git" ]; then
+              IFS= read -r gitfile < "$subpath/.git"
+              if [[ "$gitfile" = 'gitdir: '* ]]; then
+                candidate="''${gitfile#gitdir: }"
+                if [[ "$candidate" != /* ]]; then candidate="$(realpath -m "$subpath/$candidate")"; fi
+                reject_stub "$candidate" "$worktree/$subpath"
               fi
-            done < <(git -c submodule.recurse=false config --file .gitmodules --get-regexp '^submodule\..*\.path$' || true)
-          fi
+            fi
+          done
           step=submodules
-          # Recurse explicitly, independent of the caller's submodule.recurse.
-          git submodule update --init --recursive
+          update_status=0
+          if [ "''${#selected_paths[@]}" -gt 0 ]; then
+            # Never pass an empty path list (Git would initialize everything).
+            # Literal pathspecs also prevent exclusions being matched by globs.
+            selected_specs=()
+            for subpath in "''${selected_paths[@]}"; do selected_specs+=(":(literal)$subpath"); done
+            git submodule update --init --recursive -- "''${selected_specs[@]}" || update_status=$?
+          fi
+          observe_submodules
+          if [ "''${#missing_paths[@]}" -gt 0 ]; then
+            printf 'worktree %s: submodules not initialized: ' "$worktree" >&2
+            printf '%q ' "''${missing_paths[@]}" >&2
+            printf '\n' >&2
+          fi
+          if [ "''${#unexpected_paths[@]}" -gt 0 ]; then
+            printf 'worktree %s: excluded submodules initialized: ' "$worktree" >&2
+            printf '%q ' "''${unexpected_paths[@]}" >&2
+            printf '\n' >&2
+          fi
+          if [ "$update_status" != 0 ]; then exit "$update_status"; fi
+          if [ "''${#missing_paths[@]}" -gt 0 ] || [ "''${#unexpected_paths[@]}" -gt 0 ]; then exit 1; fi
+        ''}
+        ${lib.optionalString (!cfg.traits.submodules) ''
+          if [ "''${#submodule_paths[@]}" -gt 0 ]; then
+            submodules_skipped='"trait-off"'
+            printf 'WARNING: worktree %s has submodules but agentic.worktree.traits.submodules is off; submodule initialization skipped\n' "$worktree" >&2
+            observe_submodules
+          fi
         ''}
         step='copy-files'
         (
@@ -289,6 +355,12 @@ in {
         example = [".env"];
         description = "Secret-bearing paths or shell glob patterns copied from the main worktree when absent, never shared. Unmatched patterns are ignored; relative paths are preserved.";
       };
+    };
+    submodules.exclude = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      example = ["secrets"];
+      description = "Top-level submodule paths exactly as declared in .gitmodules to leave uninitialized. Setup never initializes or recurses into these paths, and fails if any is already initialized.";
     };
     copyFiles = lib.mkOption {
       type = lib.types.listOf lib.types.str;
