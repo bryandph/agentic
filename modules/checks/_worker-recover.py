@@ -144,3 +144,46 @@ with tempfile.TemporaryDirectory() as temp:
     symlink=temp/'linked.creds'; symlink.symlink_to(creds)
     assert call('--admin-creds',str(symlink))['evidence']['queue']['available'] is False
     print('admin creds mode/symlink + queue single sample sanitization PASS')
+    # Fixed shared BPH-81 state contract: seconds (not snapshot milliseconds).
+    setup('progressing')
+    watch = temp / 'state/agentic-attention-watch/state.json'
+    watch.parent.mkdir()
+    def watch_state(**changes):
+        state = {'schema':'agentic.attention-watch.state/1','writtenAt':time.time(),
+                 'intervalSeconds':60,'brokerCoverageSeconds':60,
+                 'broker_progress':{'worker':{'floor':5,'since':time.time()-901,'observedAt':time.time()}},
+                 'ignored_secret':'NEVER COPY WATCHER PRIVATE FIELDS'}
+        state.update(changes)
+        watch.write_text(json.dumps(state)); watch.chmod(0o600)
+    watch_state()
+    row=call(); assert row['class']=='queue-stalled' and row['evidence']['watcherQueue']['stalled'] is True
+    assert 'NEVER COPY' not in json.dumps(row)
+    print('watch state fresh stalled + ignored fields PASS')
+    watch_state(broker_progress={})
+    row=call(); assert row['evidence']['watcherQueue']['stalled'] is False and row['class']=='progressing'
+    watch_state(broker_progress={'worker':{'floor':5,'since':time.time()-899,'observedAt':time.time()}})
+    assert call()['evidence']['watcherQueue']['stalled'] is False
+    print('watch state fresh no backlog and below threshold PASS')
+    watch_state(broker_progress={'worker':{'floor':5,'since':time.time()-901,'observedAt':time.time()-121}})
+    row=call(); assert row['evidence']['watcherQueue']['available'] is False
+    assert row['evidence']['watcherQueue']['stalled'] is None
+    assert row['evidence']['watcherQueue']['reason']=='queue: unknown (watcher sample too old)'
+    assert row['class']=='progressing'
+    print('watch state fresh file but old per-agent sample unavailable PASS')
+    watch_state(writtenAt=time.time()-181)
+    row=call(); assert row['evidence']['watcherQueue']['available'] is False
+    assert row['evidence']['watcherQueue']['stalled'] is None
+    assert 'watcher state stale' in row['evidence']['watcherQueue']['reason']
+    print('watch state stale unavailable PASS')
+    watch_state(schema='future/2')
+    assert call()['evidence']['watcherQueue']['available'] is False
+    print('watch state wrong schema unavailable PASS')
+    for changes in ({'intervalSeconds':0},{'writtenAt':True},{'broker_progress':{'worker':{'floor':True,'since':1}}}):
+        watch_state(**changes)
+        assert call()['evidence']['watcherQueue']['available'] is False
+    print('watch state malformed facts unavailable PASS')
+    watch_state()
+    override=temp/'watch-override.json'; watch.rename(override)
+    assert call()['evidence']['watcherQueue']['available'] is False
+    assert call('--watch-state',str(override))['class']=='queue-stalled'
+    print('watch state override PASS')

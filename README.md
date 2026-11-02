@@ -400,7 +400,19 @@ file with permissions exactly 0600 (no symlink) is accepted. The read-only
 `cotal pending` sample retains only pending/ack-pending counts and sequence
 numbers, never ids/senders/bodies. A single sample cannot prove progress stalled;
 it is labelled `queue: unknown (single sample)`. Presence ages never imply a
-queue stall.
+queue stall. Recovery also reads the watcher's published floor observations from
+`$XDG_STATE_HOME/agentic-attention-watch/state.json` (override with
+`--watch-state <path>`), without changing the file. It requires an owned regular
+0600 file, schema `agentic.attention-watch.state/1`, epoch-second `writtenAt`,
+and positive `intervalSeconds`. State older than three intervals is unavailable.
+Only `broker_progress[<presence-name>] = {floor, since, observedAt}` and the
+file's `brokerCoverageSeconds` are inspected: a fresh entry with unchanged floor
+for at least 900 seconds yields `queue-stalled` only when that agent was actually
+observed within twice the coverage interval. Older per-agent observations are
+`queue: unknown (watcher sample too old)`, even if the file is fresh from reading
+other agents. A fresh file without an entry means not stalled per watcher. Missing, malformed,
+stale or unknown-schema state leaves this queue observation unknown. Other
+watcher state keys are ignored, not copied into recovery output.
 
 Recovery refuses unless a known schema-1 snapshot's pid is dead, a complete mesh
 presence read proves the old name offline (absence from complete live presence

@@ -3,6 +3,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -105,6 +106,52 @@ def pending(args):
             "pending": data.get("pending"), "ackPending": data.get("ackPending"), **sequences}
 
 
+def watch_progress(args):
+    """Read only the watcher's published floor observations, never its other state."""
+    default = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "agentic-attention-watch/state.json"
+    file = Path(args.watch_state).expanduser() if args.watch_state else default
+    observation = {"available": False, "stalled": None, "path": str(file)}
+    try:
+        info = file.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            raise ValueError("watcher state must be an owned regular file with mode 0600")
+        state = json.loads(file.read_text())
+        if not isinstance(state, dict) or state.get("schema") != "agentic.attention-watch.state/1":
+            raise ValueError("unsupported watcher state schema")
+        def number(value):
+            return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        written, interval = state.get("writtenAt"), state.get("intervalSeconds")
+        if not number(written) or not number(interval) or interval <= 0:
+            raise ValueError("invalid watcher state timing")
+        now = time.time()
+        if written < now - 3 * interval:
+            raise ValueError("watcher state stale")
+        progress = state.get("broker_progress")
+        if not isinstance(progress, dict):
+            raise ValueError("invalid watcher broker progress")
+        entry = progress.get(args.worker)
+        if entry is None and args.worker not in progress:
+            observation.update(available=True, stalled=False, reason="queue: not stalled (per watcher)")
+        else:
+            if not isinstance(entry, dict) or not isinstance(entry.get("floor"), int) or isinstance(entry.get("floor"), bool) or entry["floor"] < 0 or not number(entry.get("since")):
+                raise ValueError("invalid watcher floor observation")
+            coverage, observed = state.get("brokerCoverageSeconds"), entry.get("observedAt")
+            if not number(coverage) or coverage <= 0 or not number(observed):
+                raise ValueError("invalid watcher broker coverage")
+            if now - observed > 2 * coverage:
+                observation["reason"] = "queue: unknown (watcher sample too old)"
+                return observation
+            duration = max(0, now - entry["since"])
+            observation.update(available=True, stalled=duration >= 900, floor=entry["floor"],
+                               since=entry["since"], observedAt=observed, brokerCoverageSeconds=coverage,
+                               stalledForSeconds=duration,
+                               reason="queue: stalled (per watcher)" if duration >= 900 else "queue: not stalled (per watcher)")
+        observation.update(writtenAt=written, intervalSeconds=interval)
+    except (OSError, ValueError, TypeError) as error:
+        observation["reason"] = f"unavailable: {error}"
+    return observation
+
+
 def observe(args):
     worktree = args.worktree
     snapshot = read(root() / args.space / f"{args.worker}.json")
@@ -148,7 +195,7 @@ def observe(args):
                    "agents": agents, "panes": [{k: p.get(k) for k in ("pane_id", "workspace_id", "cwd", "agent", "agent_status")} for p in panes],
                    "processes": processes, "processKnown": process_known, "piPids": pi_pids,
                    "duplicate": duplicate, "liveSnapshots": [s["path"] for s in live_snapshots],
-                   "gitProcesses": git_processes(worktree), "queue": pending(args)}
+                   "gitProcesses": git_processes(worktree), "queue": pending(args), "watcherQueue": watch_progress(args)}
     # A complete live-presence read with no matching name proves offline;
     # a failed/partial read never does. Require a known dead snapshot pid too.
     gone = (snapshot.get("available") and snapshot.get("pidAlive") is False
@@ -163,6 +210,8 @@ def classify(e):
         return "unknown"
     if e["fenced"]:
         return "dead"
+    if e["watcherQueue"].get("available") and e["watcherQueue"].get("stalled"):
+        return "queue-stalled"
     snapshot = e["snapshot"]
     queue = snapshot.get("queue") or {}
     if not snapshot.get("stale") and (queue.get("automaticCount") or 0) > 0 and (queue.get("automaticQueueStalledForMs") or 0) >= 900_000:
@@ -277,6 +326,7 @@ def main():
     parser.add_argument("--worktree", required=True)
     parser.add_argument("--space", default=os.environ.get("COTAL_SPACE"))
     parser.add_argument("--admin-creds")
+    parser.add_argument("--watch-state", help="read-only attention watcher state override")
     parser.add_argument("--action", choices=["resume", "replace"])
     parser.add_argument("--assignment")
     parser.add_argument("--json", action="store_true", help="JSON is always emitted")
