@@ -69,6 +69,11 @@ state_dir = "~/.local/state/agentic-attention-watch"
 pending_per_poll = 16           # rotating per-poll cap; 1..100
 ci_lookback = 86400             # ignore watch states older than 24 hours
 
+# Optional: select this watcher instance's DM target on this host.
+[notify_seat]
+pattern = "coord-BPH-*"         # or name = "exact-presence-name", never both
+local = true                   # needs the seat-snapshot extension on the seat
+
 [thresholds]
 broker = 900
 rate_limit = 600
@@ -106,8 +111,8 @@ stdout are discarded, not included in logs, status or notifications.
 | Source | Observation and default escalation |
 |---|---|
 | S1 Cotal presence | `cotal endpoints --json`, using `facts.condition`, text ages in `facts.ages` and `activityAge`. Rate limit ≥10 min, approval/input ≥15 min, or working with last `active` ≥30 min. `unchanged` alone is not proof of a frozen turn. All live agents are observed without any snapshot dependency. Optional `host` limits work observations to matching `card.meta.host` (or flattened `meta.host`), including untagged agents; seat routing always uses the whole live roster. |
-| S2 broker | `cotal pending <peer> --space <space> --creds <path> --json` for **every** live agent, including coordinators, workers and the operator seat. `pending_per_poll` bounds each poll; a persisted cursor rotates coverage across polls/restarts. The S2 subprocess budget is at most one run interval (each call ≤20 s). Deferred peers are unknown, not resolved; status reports inspected/deferred counts. Nonempty `pending + ackPending` with an unchanged `ackFloor` for ≥15 min. Floor advances or empty backlog reset the persisted clock. Only counts, floor/delivered sequence numbers, and candidate timestamps are projected. Candidate ages are informational: a **bounded sample of recent candidates, not the oldest held**. Cotal 0.91 exposes no redelivery count: it is unavailable, not zero, and there is no active redelivery rule. No message IDs, senders, subjects or bodies are retained. |
-| S3 seat snapshots | Optional `cotal-seat/<space>/*.json`, schema `agentic.seat-snapshot/1`, used for liveness and owner enrichment only. An existing snapshot whose write is stale (>3×60 s) or PID is dead **while its presence remains live** escalates as “seat process gone or wedged”. Missing snapshots produce status `unavailable: no snapshots (extension not enabled?)`, not a finding or notification. `connection: null` plus `connectionError` is normal: no queue-health inference or failure. An existing unreadable/unknown-schema snapshot is unavailable and notifies the human. |
+| S2 broker | `cotal pending <peer> --space <space> --creds <path> --json` for **every** live agent, including coordinators, workers and the operator seat. `pending_per_poll` bounds each poll; a persisted cursor rotates coverage across polls/restarts. The S2 subprocess budget is at most one run interval (each call ≤20 s). Deferred peers are unknown, not resolved; status reports inspected/deferred/suppressed counts (no names). Nonempty `pending + ackPending` with an unchanged `ackFloor` for ≥15 min. A peer whose presence is `working` and whose last `active` age is below `thresholds.working` (default 30 min) suppresses this finding, not the pending read or floor clock: `floor`, `since` and `observedAt` keep their existing meanings. On the next read, idle/waiting or stale activity can fire immediately with the floor still unmoved; missing activity age does not suppress. Floor advances or empty backlog reset the persisted clock. Only counts, floor/delivered sequence numbers, and candidate timestamps are projected. Candidate ages are informational: a **bounded sample of recent candidates, not the oldest held**. Cotal 0.91 exposes no redelivery count: it is unavailable, not zero, and there is no active redelivery rule. No message IDs, senders, subjects or bodies are retained. |
+| S3 seat snapshots | Optional `cotal-seat/<space>/*.json`, schema `agentic.seat-snapshot/1`, used for liveness, owner enrichment and optional host-local seat selection. An existing snapshot whose write is stale (>3×60 s) or PID is dead **while its presence remains live** escalates as “seat process gone or wedged”. Missing snapshots produce status `unavailable: no snapshots (extension not enabled?)`, not a finding or notification. `connection: null` plus `connectionError` is normal: no queue-health inference or failure. An existing unreadable/unknown-schema snapshot is unavailable and notifies the human. |
 | S4 Herdr | `herdr agent list` and `herdr pane process-info --pane`, limited to workspace-root descendants. Blocked/waiting/input/approval observed continuously ≥10 min; first-observed clocks persist over restarts. Raw argv, command lines and terminal text are never emitted or retained. Ambiguous owner → human notification. |
 | S5 git | `ps` elapsed time and `lsof` cwd: git/git-remote/git-lfs process ≥20 min with cwd under workspace root (path boundary checked). No process arguments are inspected. Unknown owner or seat-owned git work → human notification. |
 | S6 CI watch | `pi-ci-watch/sessions/*/watches/*/state.json` plus sibling `watch.json`. Pending watches (including actual `phase=running` with `lastObservation.phase=pending`) escalate when `observedAt` exceeds 3× maximum poll cadence, PID is dead, or deadline has passed. Current exponential interval is not persisted, so the maximum is the conservative bound (default 600 s for empty cadence). Only states observed within `ci_lookback` (default 24 h) are considered. Older state is counted as `ignored: N old watch states` in status and never escalated. Terminal/cancelled/error watches are ignored. |
@@ -119,12 +124,47 @@ sooner than every two hours (also coalesced). Config may tighten but not loosen 
 delivery bounds. The next DM lists resolutions since the last DM; resolutions never
 send a standalone message. Unreadable sources do not resolve previously firing work.
 
-A seat's own condition, queue/backlog or snapshot, zero/multiple live seats, and
-configured/expected sources that fail to read use `herdr notification show` instead
-of a DM. Absent optional S2 credentials and S3 snapshots are status-only, never
+The optional `notify_seat` table sets notification routing for **this watcher
+instance on this host only**. It is the watcher's DM destination only, not
+human-contact ownership, `ask_user` ownership or approval authority; it is not
+exclusive, not a transfer, and not authority. Set exactly one nonempty string: `name` matches an exact live
+role=`seat` presence name, or `pattern` matches those names using a case-sensitive
+fnmatch glob. Optional boolean `local = true` additionally requires a fresh, valid
+`agentic.seat-snapshot/1` file in `snapshot_dir`, for that name and space, with a
+live PID and a cwd under `workspace_root`. It reuses S3's snapshot freshness rule
+(default ≤180 s); enable the seat-snapshot extension on the seat for this option.
+Unknown keys, both/neither selector, invalid types or empty selectors refuse
+startup without echoing values. An omitted table retains the original routing:
+exactly one live seat → DM; zero/multiple live seats → notification. With a table,
+exactly one qualifying seat → DM only to it; zero → notification with reason
+`selected contact absent`; multiple → notification with reason
+`selected contact ambiguous`. There is no guess or fallback to another seat.
+`status.json` includes `notifySeat: {selector, local, resolved, reason}`, with selector
+`unset`, `name` or `pattern` and a resolved presence name or null. Changing the
+resolved name does not create a new transition or reset delivery deduplication.
+
+A fnmatch match plus a local snapshot with a live PID proves only **a matching,
+live, local candidate**. The snapshot is local liveness evidence only, not a global
+selection, identity/auth proof, revocation of an old session or approval validity.
+The watcher's presence projection does not carry host information reliably:
+Cotal 0.91 `AgentCard.meta.host` is optional and advisory (the existing `host`
+filter reads it); BPH-92 does not use it as proof. Each host's watcher can validly
+route to a different seat. There is no automatic takeover: if a configured seat
+is absent while another seat is live, the watcher notifies rather than DMs the
+other seat.
+
+**Future (not implemented):** a global contact mode would be a **distinct typed
+selector/adapter** resolving shared authority with incarnation + epoch, conditional
+transfer and fail-closed validation. It must not reinterpret `pattern` as
+authority. Once a global contact is explicitly configured, the unset legacy
+single-seat fallback must not bypass it. This is outside BPH-92's scope.
+
+Any seat's own condition, queue/backlog or snapshot (even the selected seat), an
+unresolved selection, and configured/expected sources that fail to read use
+`herdr notification show` instead of a DM. Absent optional S2 credentials and S3 snapshots are status-only, never
 notifications. Human notifications
 are at most once per transition ID, with no reminder and no subsequent DM for that
-same ID. Only the single live seat may receive a DM; coordinators/workers never do.
+same ID. Only the resolved live seat may receive a DM; coordinators/workers never do.
 Every escalation includes kind, subject, observation time, facts/ages, threshold,
 ID and a suggested manual owner/action. A human notification is a routing fallback,
 not evidence of DM delivery or operator acknowledgement.

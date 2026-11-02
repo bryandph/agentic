@@ -526,6 +526,165 @@ class Sandbox(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)['report']['observations']['S2']['inspectedPeers'], 2)
         self.assertNotIn(flag_server, result.stdout + result.stderr)
 
+    def test_notify_seat_unset_one_and_two_live_seats(self):
+        for seats, route, resolved in [(['operator'], 'dm', 'operator'),
+                                       (['operator', 'other'], 'notification', None)]:
+            with self.subTest(seats=seats):
+                self.w = a.Watcher(self.c, clock=lambda: self.now)
+                self.finding()
+                self.w.seats = seats
+                delivery = self.w.deliver(dry_run=True)
+                self.assertEqual(delivery[0]['route'], route)
+                self.assertEqual(self.w.report()['notifySeat']['resolved'], resolved)
+                self.assertEqual(self.w.report()['notifySeat']['selector'], 'unset')
+
+    def test_notify_seat_name_present_absent_and_pattern_ambiguous(self):
+        for notify_seat, target, reason in [({'name': 'other'}, 'other', 'selected contact resolved'),
+                                        ({'name': 'missing'}, None, 'selected contact absent'),
+                                        ({'pattern': '*'}, None, 'selected contact ambiguous')]:
+            with self.subTest(notify_seat=notify_seat):
+                self.c['notify_seat'] = notify_seat
+                self.w = a.Watcher(self.c, clock=lambda: self.now)
+                self.finding()
+                self.w.seats = ['operator', 'other']
+                delivery = self.w.deliver(dry_run=True)
+                self.assertEqual(len(delivery), 1)
+                self.assertEqual(delivery[0]['target'], target or 'human')
+                self.assertEqual(delivery[0]['route'], 'dm' if target else 'notification')
+                self.assertEqual(self.w.report()['notifySeat'], {
+                    'selector': 'name' if 'name' in notify_seat else 'pattern', 'local': False,
+                    'resolved': target, 'reason': reason})
+                if target is None:
+                    self.assertIn(reason, delivery[0]['text'])
+
+    def test_notify_seat_pattern_local_live_snapshot_and_fail_closed(self):
+        self.c['notify_seat'] = {'pattern': 'coord-BPH-*', 'local': True}
+        self.fixture['cotal:endpoints']['items'] = [self.peer('coord-BPH-one', 'seat'),
+            self.peer('coord-BPH-two', 'seat'), self.peer('worker', condition='rate_limit for 12m')]
+        self.snapshot('coord-BPH-one')
+        self.observe()
+        delivery = self.w.deliver(dry_run=True)
+        self.assertEqual([(d['route'], d['target']) for d in delivery], [('dm', 'coord-BPH-one')])
+        self.assertEqual(self.w.report()['notifySeat']['local'], True)
+        for extra in ({'writtenAt': (self.now - 181)*1000}, {'pid': 999999999},
+                      {'cwd': self.c['workspace_root'] + '-outside'}, {'space': 'other'},
+                      {'schema': 'future'}, {'pid': True}, {'cwd': ''},
+                      {'writtenAt': float('nan')}):
+            with self.subTest(extra=extra):
+                self.snapshot('coord-BPH-one', **extra)
+                self.observe()
+                self.assertIsNone(self.w.report()['notifySeat']['resolved'])
+                self.assertEqual(self.w.report()['notifySeat']['reason'], 'selected contact absent')
+                deliveries = self.w.deliver(dry_run=True)
+                self.assertTrue(deliveries)
+                self.assertTrue(all(d['route'] == 'notification' for d in deliveries))
+        self.snapshot('coord-BPH-one')
+        self.snapshot('coord-BPH-two')
+        self.observe()
+        self.assertEqual(self.w.report()['notifySeat']['reason'], 'selected contact ambiguous')
+        self.c['notify_seat']['pattern'] = 'COORD-BPH-*'
+        self.assertEqual(self.w.report()['notifySeat']['reason'], 'selected contact absent')
+
+    def test_notify_seat_no_automatic_takeover_zero_or_several_matches(self):
+        for selector, seats, reason in [
+                ({'name': 'departed'}, ['other'], 'selected contact absent'),
+                ({'pattern': 'coord-BPH-*'}, ['other'], 'selected contact absent'),
+                ({'pattern': 'coord-BPH-*'}, ['coord-BPH-one', 'coord-BPH-two'],
+                 'selected contact ambiguous')]:
+            with self.subTest(selector=selector, seats=seats):
+                self.c['notify_seat'] = selector
+                self.w = a.Watcher(self.c, clock=lambda: self.now)
+                self.finding()
+                self.w.seats = seats
+                delivery = self.w.deliver(dry_run=True)
+                self.assertEqual([(d['route'], d['target']) for d in delivery],
+                                 [('notification', 'human')])
+                self.assertIn(reason, delivery[0]['text'])
+                self.assertIsNone(self.w.report()['notifySeat']['resolved'])
+
+    def test_notify_seat_seat_subject_always_notification(self):
+        self.c['notify_seat'] = {'name': 'operator'}
+        for subject in ('operator', 'other'):
+            with self.subTest(subject=subject):
+                self.finding(subject)
+                self.w.seats = ['operator', 'other']
+                deliveries = self.w.deliver(dry_run=True)
+                self.assertTrue(all(d['route'] == 'notification' for d in deliveries))
+
+    def test_notify_seat_change_does_not_resend_transition_after_restart(self):
+        self.c['notify_seat'] = {'name': 'operator'}
+        self.finding()
+        self.w.seats = ['operator', 'other']
+        self.w.deliver()
+        self.now += 120
+        self.assertEqual(self.w.deliver()[0]['target'], 'operator')
+        event_id = self.w.state['events']['rate_limit:worker']['id']
+        self.c['notify_seat']['name'] = 'other'
+        self.restart()
+        self.finding()
+        self.w.seats = ['operator', 'other']
+        self.now += 120
+        self.assertEqual(self.w.deliver(), [])
+        self.assertEqual(self.w.state['events']['rate_limit:worker']['id'], event_id)
+        self.assertEqual(self.w.report()['notifySeat']['resolved'], 'other')
+        self.c['notify_seat']['name'] = 'missing'
+        self.now += 7320
+        self.assertEqual(self.w.deliver()[0]['route'], 'notification')
+        self.c['notify_seat']['name'] = 'operator'
+        self.now += 10000
+        self.assertEqual(self.w.deliver(), [])  # human transition cannot later DM
+
+    def test_notify_seat_config_validation_and_non_disclosing_startup(self):
+        path = self.root / 'notify_seat.json'
+        invalid = [{}, {'local': True}, {'name': SENTINEL, 'pattern': '*'},
+                   {'name': 4}, {'pattern': False}, {'name': ''}, {'pattern': '  '},
+                   {'name': SENTINEL, 'local': 'true'}, {'pattern': '*', 'local': 1},
+                   {'name': SENTINEL, 'unknown': True}, SENTINEL, [], False]
+        for notify_seat in invalid:
+            with self.subTest(notify_seat=notify_seat):
+                path.write_text(json.dumps({**self.c, 'notify_seat': notify_seat}))
+                result = subprocess.run([sys.executable, str(ROOT / 'attention_watch.py'),
+                    'run', '--once', '--config', str(path)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stderr.strip(),
+                    'agentic-attention-watch: watcher state/config unavailable; refusing to start')
+                self.assertNotIn(SENTINEL, result.stdout + result.stderr)
+                self.assertFalse(self.delivery_path.exists())
+                self.assertFalse((Path(self.c['state_dir']) / 'lock').exists())
+        toml = self.root / 'notify_seat.toml'
+        toml.write_text('[notify_seat]\npattern = "coord-BPH-*"\nlocal = true\n')
+        self.assertEqual(a.config(toml)['notify_seat'], {'pattern': 'coord-BPH-*', 'local': True})
+
+    def test_s2_busy_fresh_keeps_floor_then_idle_waiting_or_stale_fires(self):
+        self.credential()
+        p = self.fixture['cotal:endpoints']['items'][1]
+        p['activityAge'] = 'active 2m ago'
+        self.observe()
+        since = self.w.state['broker_progress']['worker']['since']
+        self.now += 900
+        self.restart()
+        self.observe()
+        self.assertFalse(any(f['kind'] == 'broker-backlog' and f['subject'] == 'worker'
+                             for f in self.w.findings))
+        self.assertEqual(self.w.observations['S2']['suppressedPeers'], 1)
+        self.assertEqual(self.w.state['broker_progress']['worker'],
+                         {'floor': 1, 'since': since, 'observedAt': self.now})
+        for status, activity in [('idle', 'active 2m ago'), ('waiting', 'active 2m ago'),
+                                 ('working', 'active 30m ago'), ('working', '')]:
+            with self.subTest(status=status, activity=activity):
+                p.update(reportedStatus=status, activityAge=activity)
+                self.observe()
+                self.assertTrue(any(f['kind'] == 'broker-backlog' and f['subject'] == 'worker'
+                                    for f in self.w.findings))
+                self.assertEqual(self.w.state['broker_progress']['worker']['since'], since)
+                self.assertEqual(self.w.observations['S2']['suppressedPeers'], 0)
+        # The pending suppression itself never treats an offline peer as busy;
+        # normal observation still polls only live peers (existing S2 eligibility).
+        p.update(reportedStatus='offline', activityAge='active 2m ago')
+        self.w.findings = []
+        self.w.pending([p], self.now)
+        self.assertEqual([f['kind'] for f in self.w.findings], ['broker-backlog'])
+
     def test_delivery_bounds_cannot_be_loosened(self):
         path = self.root / 'config.toml'
         path.write_text('[rate_limits]\ncoalesce = 0\nhourly = 100\nreminder = 1\n')
