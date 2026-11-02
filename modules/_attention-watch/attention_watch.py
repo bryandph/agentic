@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import tomllib
+from urllib.parse import urlsplit
 
 
 class Unavailable(Exception):
@@ -89,13 +90,28 @@ def command(args, structured=True, allow_partial=False, timeout=20):
         raise Unavailable() from None
 
 
-def config(path=None):
+def validate_server(value):
+    if value is None:
+        return None
+    try:
+        if not isinstance(value, str) or not value or any(ch.isspace() for ch in value):
+            raise ValueError()
+        url = urlsplit(value)
+        if url.scheme not in ('nats', 'tls', 'ws', 'wss') or not url.hostname:
+            raise ValueError()
+        url.port  # Reject malformed/out-of-range ports, without echoing the URL.
+    except ValueError:
+        raise ValueError('invalid server URL') from None
+    return value
+
+
+def config(path=None, server=None):
     xdg = Path(os.environ.get('XDG_STATE_HOME', '~/.local/state')).expanduser()
     defaults = {
         'space': 'default', 'workspace_root': str(Path.home()),
         'state_dir': str(xdg / 'agentic-attention-watch'),
         'snapshot_dir': None, 'ci_dir': str(xdg / 'pi-ci-watch'),
-        'admin_creds': None, 'dry_run': False, 'host': None,
+        'admin_creds': None, 'server': None, 'dry_run': False, 'host': None,
         'pending_per_poll': 16, 'ci_lookback': 86400,
         'thresholds': {'broker': 900,
                        'rate_limit': 600, 'approval': 900, 'input': 900,
@@ -118,6 +134,7 @@ def config(path=None):
             else:
                 defaults[key] = val
     c = defaults
+    c['server'] = validate_server(server if server is not None else c['server'] if c['server'] is not None else os.environ.get('AGENTIC_COTAL_SERVER'))
     if not isinstance(c['space'], str) or not re.fullmatch(r'[A-Za-z0-9_-]+', c['space']):
         raise ValueError('space must be a simple nonempty name')
     c['snapshot_dir'] = c['snapshot_dir'] or str(xdg / 'cotal-seat' / c['space'])
@@ -241,7 +258,8 @@ class Watcher:
             self.state['pending_cursor'] = (items.index(p) + 1) % len(items)
             self.pending_checked.add(name)
             data = command(['cotal', 'pending', name, '--space', self.c['space'],
-                            '--creds', self.c['admin_creds'], '--json'],
+                            '--creds', self.c['admin_creds'], '--json'] +
+                           (['--server', self.c['server']] if self.c['server'] else []),
                            allow_partial=True, timeout=min(20, remaining))
             now = self.clock()  # Timestamp this agent's completed read, not the poll start.
             self.observations['S2']['inspectedPeers'] += 1
@@ -528,13 +546,14 @@ def main(argv=None):
     parser.add_argument('command', choices=('run', 'status'), nargs='?', default='run')
     parser.add_argument('--config')
     parser.add_argument('--admin-creds', help='override config/env admin credential pathname')
+    parser.add_argument('--server', help='override config/env admin broker URL')
     parser.add_argument('--interval', type=float, default=60)
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
     try:
-        c = config(args.config)
+        c = config(args.config, server=args.server)
         if args.admin_creds:
             c['admin_creds'] = str(Path(args.admin_creds).expanduser().absolute())
         credential_available(c)  # Refuse before opening state or running any command.

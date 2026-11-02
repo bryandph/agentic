@@ -61,6 +61,7 @@ space = "default"
 workspace_root = "~/workspace"  # default: home directory
 state_dir = "~/.local/state/agentic-attention-watch"
 # admin_creds = "~/.local/share/cotal/default/attention-watch/admin.creds"
+# server = "tls://broker.example:4222" # off-registry admin connection only
 # snapshot_dir = "~/.local/state/cotal-seat/default"
 # ci_dir = "~/.local/state/pi-ci-watch"
 # dry_run = true
@@ -87,7 +88,13 @@ reminder = 7200
 State/snapshot/CI defaults honor `XDG_STATE_HOME`. The credential default uses
 `~/.local/share/cotal/<space>/attention-watch/admin.creds`. Override it with
 `AGENTIC_COTAL_ADMIN_CREDS`, config `admin_creds`, or `--admin-creds <path>`
-(in increasing precedence). An absent credential makes S2 **unavailable**, never
+(in increasing precedence). For an off-registry admin credential, set `server`
+in TOML/JSON, `AGENTIC_COTAL_SERVER`, or `--server <url>` (flag > config > env).
+The optional URL must have a host and a `nats`, `tls`, `ws`, or `wss` scheme;
+invalid values refuse startup. It is passed only to admin-credential calls,
+never to registry-backed endpoints/send calls, and is not printed in DMs or
+notifications. With no server configured, command routing is unchanged.
+An absent credential makes S2 **unavailable**, never
 healthy or zero, but is optional and does not notify the human. Before starting
 any subprocess, the watcher checks credential metadata: it refuses a symlink,
 nonregular file, wrong owner, or permission bits other than **exactly 0600**.
@@ -544,6 +551,13 @@ fresh connector observation can identify a queue head stalled for 15 minutes.
 Missing diagnostics/ages remain unknown, never an invented healthy state.
 Hung-process output suggests `kill -TERM <pid>` for coordinator review; the tool
 never executes it or kills anything.
+
+Optional broker queue observation accepts `--server <url>` (overrides
+`AGENTIC_COTAL_SERVER`) for the off-registry admin connection; other Cotal
+calls still use the space registry. An exit-4 partial pending read is accepted
+only with numeric pending, ackPending and ackFloor facts, and is labelled
+`"completeness": "partial"` beside the sanitized sample. Other queries still
+require a complete, ok result.
 
 Optional broker queue observation uses `--admin-creds`, then
 `AGENTIC_COTAL_ADMIN_CREDS`, then

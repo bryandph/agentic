@@ -27,13 +27,21 @@ if (name == 'cotal' and args[0] == 'send') or (name == 'herdr' and args[:2] == [
         h.write(json.dumps([name, args]) + '\n')
     sys.exit(f.get('deliveryExit', 0))
 key = name
-if name == 'cotal': key += ':' + args[0]
+if name == 'cotal':
+    key += ':' + args[0]
+    if args[0] == 'pending':
+        expected = f.get('server')
+        assert (args[args.index('--server')+1] if '--server' in args else None) == expected
+    else:
+        assert '--server' not in args
 if name == 'herdr': key += ':' + ':'.join(args[:2])
 if key in f.get('fail', []):
     print('NEVER_EXPORT_PENDING_OR_CREDENTIAL_9182', file=sys.stderr)
     sys.exit(1)
 v = f[key]
-print(v if isinstance(v, str) else json.dumps({'result': v}))
+partial = key == 'cotal:pending' and f.get('partial')
+print(v if isinstance(v, str) else json.dumps({'result': v, 'outcome': 'partial' if partial else 'ok', 'completeness': 'partial' if partial else 'complete'}))
+sys.exit(4 if partial else 0)
 '''
 
 
@@ -476,6 +484,47 @@ class Sandbox(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)['sources']['S2'], 'available')
             self.assertNotIn(SENTINEL, result.stdout + result.stderr)
+
+    def test_server_pending_partial_and_privacy(self):
+        self.credential()
+        for server in (None, 'tls://broker.invalid:4222'):
+            self.c['server'] = server
+            self.fixture.update(server=server, partial=True)
+            self.observe()
+            self.assertEqual(self.w.state['broker_progress']['worker']['floor'], 1)
+            self.now += 901
+            self.assertIn('broker-backlog', self.observe())
+            self.assertNotIn('broker.invalid', json.dumps(self.w.deliver(dry_run=True)))
+
+    def test_server_config_env_flag_validation(self):
+        env_server = 'nats://env.invalid:4222'
+        config_server = 'wss://config.invalid/path'
+        flag_server = 'tls://flag.invalid:4222'
+        with patch.dict(os.environ, {'AGENTIC_COTAL_SERVER': env_server}):
+            self.assertEqual(a.config()['server'], env_server)
+            for suffix in ('json', 'toml'):
+                path = self.root / ('server.' + suffix)
+                path.write_text(json.dumps({'server': config_server}) if suffix == 'json' else 'server = "' + config_server + '"\n')
+                self.assertEqual(a.config(path)['server'], config_server)
+                self.assertEqual(a.config(path, server=flag_server)['server'], flag_server)
+            for invalid in ('https://private.invalid', 'tls:', 'broker.invalid:4222', 'tls://', 'tls://host:bad', 'tls://host:99999', 'tls://host space', ''):
+                result = subprocess.run([sys.executable, str(ROOT / 'attention_watch.py'), 'run', '--once', '--config', str(path), '--server', invalid], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('private.invalid', result.stdout + result.stderr)
+            with patch.dict(os.environ, {'AGENTIC_COTAL_SERVER': 'invalid'}):
+                self.assertEqual(a.config(server=flag_server)['server'], flag_server)
+                with self.assertRaises(ValueError):
+                    a.config()
+        self.credential()
+        self.fixture['server'] = flag_server
+        self.fixture['partial'] = True
+        self.write_fixture()
+        path = self.root / 'cli.json'
+        path.write_text(json.dumps({**self.c, 'server': 'invalid'}))
+        result = subprocess.run([sys.executable, str(ROOT / 'attention_watch.py'), 'run', '--once', '--dry-run', '--config', str(path), '--server', flag_server], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['report']['observations']['S2']['inspectedPeers'], 2)
+        self.assertNotIn(flag_server, result.stdout + result.stderr)
 
     def test_delivery_bounds_cannot_be_loosened(self):
         path = self.root / 'config.toml'
