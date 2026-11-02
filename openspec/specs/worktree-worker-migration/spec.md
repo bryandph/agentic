@@ -66,6 +66,40 @@ adoption or force-removal.
 - **WHEN** a repository cleanup action fails or resource ownership cannot be established
 - **THEN** removal is withheld, evidence and resources are preserved, and the coordinator receives the blocker
 
+### Requirement: Verified and observable submodule preparation
+When `agentic.worktree.traits.submodules` is true, setup SHALL initialize every
+non-excluded top-level `.gitmodules` path recursively with an explicit path
+list. `agentic.worktree.submodules.exclude` SHALL default to an empty list and
+match exact top-level declared paths. Setup MUST NOT initialize, clone or recurse
+into excluded paths. After initialization it SHALL verify that every selected
+path is initialized and every excluded path remains uninitialized. A Git error
+or a violated postcondition SHALL fail setup at `submodules` with affected paths
+reported, even if Git returned success. Existing LAB-178 stub detection SHALL
+remain before this step, after worktree-config, fsmonitor and discovery.
+
+Setup SHALL record `submodules: {configured, initialized, excluded, skipped}` in
+`workbench-setup.json`, with observed initialized top-level paths, configured
+exclusions, and skipped either null, `trait-off` or `no-gitmodules`. With the trait
+off and declared submodules present, setup SHALL warn once naming
+`agentic.worktree.traits.submodules`, record `trait-off`, and remain successful
+unless another setup step fails.
+
+#### Scenario: Recursive initialization with exclusion
+- **WHEN** setup runs in a linked worktree with two submodules, one recursively nested, and the other excluded
+- **THEN** the selected submodule and its nested submodule are initialized, the excluded submodule is untouched, and the successful record reports the selected top-level path and exclusion
+
+#### Scenario: Trait off is visible
+- **WHEN** a worktree declares submodules but the submodules trait is off
+- **THEN** setup prints one warning, records `configured: false` and `skipped: "trait-off"`, and does not initialize submodules
+
+#### Scenario: Successful Git command did not initialize
+- **WHEN** Git returns success without initializing a configured non-excluded path
+- **THEN** setup fails at `submodules`, naming the missing path and recording the observed initialized paths
+
+#### Scenario: Initialization fails or exclusion is initialized
+- **WHEN** a submodule URL is unreachable or an excluded submodule is already initialized
+- **THEN** setup fails at `submodules`, retains partial observations in its result, and does not delete existing checkouts
+
 ### Requirement: One structured worker startup observation
 Both shell transports SHALL provide `workbench-worker-start` for a coordinator's
 existing Herdr shell pane and worktree. It SHALL check repository setup and

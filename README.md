@@ -454,7 +454,18 @@ never changes the caller's recursion policy.
 
 Configure `workbench.worktree` (or `agentic.worktree`):
 
-- `traits.submodules`: recursively initialize submodules (default false).
+- `traits.submodules`: recursively initialize declared submodules (default false).
+  If off while `.gitmodules` has entries, setup warns once naming
+  `agentic.worktree.traits.submodules` and records `skipped: "trait-off"`;
+  intentional opt-outs still succeed.
+- `submodules.exclude`: exact top-level paths from `.gitmodules` to leave
+  uninitialized (default `[]`), for example `["secrets"]`. Setup only passes
+  non-excluded paths to recursive initialization, never cloning or recursing
+  into an excluded path. It then verifies every selected top-level submodule
+  is initialized and every excluded one is not. Missing initialization (even
+  after a successful Git command), an initialized exclusion, or a Git error
+  fails at `submodules`, listing affected paths. Existing excluded checkouts
+  are not deinitialized or deleted; repair their state manually.
 - `traits.secretDotfiles`: paths or shell globs copied, never shared (default empty).
 - `copyFiles`: paths or shell globs copied when absent from the new worktree
   (default `[".envrc" ".claude"]`). Both lists expand against the main checkout,
@@ -490,8 +501,13 @@ Setup atomically writes `workbench-setup.json` inside the target's own
 It contains `status` (`ok|failed`), `failedStep` (string or null),
 `warmUp` (`{status, exitCode}`, with status `not-run|skipped|ok|failed`),
 UTC `startedAt`/`finishedAt` timestamps, and `setupCommand` (the canonical
-executable's store path). Failed setup exits nonzero; invalid arguments exit 64.
-Check mode does not run setup or hooks:
+executable's store path). `submodules` contains `configured` (the trait boolean),
+`initialized` (observed initialized top-level paths in declaration order),
+`excluded` (the configured exclusion list), and `skipped` (`null`, `"trait-off"`,
+or `"no-gitmodules"`). Initialization is observed even after an update failure;
+partial results remain visible in a failed record. When a preceding step fails,
+initialization has not yet been observed and the list is empty. Failed setup
+exits nonzero; invalid arguments exit 64. Check mode does not run setup or hooks:
 
 | `--check [<path>]` exit | Meaning | Next action |
 | --- | --- | --- |
