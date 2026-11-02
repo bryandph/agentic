@@ -27,7 +27,14 @@ def query(argv):
     code, output = run(argv)
     try:
         doc = json.loads(output)
-        if code or not isinstance(doc.get("result"), dict):
+        if not isinstance(doc.get("result"), dict):
+            return None
+        if argv[:2] == ["cotal", "pending"] and code == 4 and doc.get("outcome") == "partial" and doc.get("completeness") == "partial":
+            data = doc["result"]
+            if all(isinstance(data.get(k), (int, float)) and not isinstance(data[k], bool) and math.isfinite(data[k]) and data[k] >= 0 for k in ("pending", "ackPending", "ackFloor")):
+                return {**data, "completeness": "partial"}
+            return None
+        if code:
             return None
         if argv[0] == "cotal" and (doc.get("outcome") != "ok" or doc.get("completeness") != "complete"):
             return None
@@ -94,16 +101,19 @@ def pending(args):
             raise ValueError("credentials not readable")
     except (OSError, ValueError) as error:
         return {"available": False, "reason": f"unavailable: {error}"}
-    data = query(["cotal", "pending", args.worker, "--space", args.space, "--creds", str(creds), "--json"])
+    data = query(["cotal", "pending", args.worker, "--space", args.space, "--creds", str(creds), "--json"] +
+                 (["--server", args.server] if args.server else []))
     if data is None:
         return {"available": False, "reason": "unavailable: pending read failed"}
     # Deliberately exclude candidate message ids, senders and bodies.
     sequences = {}
     for key in ("ackFloor", "delivered"):
         value = data.get(key)
-        sequences[key] = {k: value.get(k) for k in ("stream_seq", "consumer_seq")} if isinstance(value, dict) else None
+        sequences[key] = ({k: value.get(k) for k in ("stream_seq", "consumer_seq")} if isinstance(value, dict)
+                          else value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0 else None)
     return {"available": True, "reason": "queue: unknown (single sample)",
-            "pending": data.get("pending"), "ackPending": data.get("ackPending"), **sequences}
+            "pending": data.get("pending"), "ackPending": data.get("ackPending"), **sequences,
+            **({"completeness": "partial"} if data.get("completeness") == "partial" else {})}
 
 
 def watch_progress(args):
@@ -326,6 +336,7 @@ def main():
     parser.add_argument("--worktree", required=True)
     parser.add_argument("--space", default=os.environ.get("COTAL_SPACE"))
     parser.add_argument("--admin-creds")
+    parser.add_argument("--server", default=os.environ.get("AGENTIC_COTAL_SERVER"), help="admin broker URL override")
     parser.add_argument("--watch-state", help="read-only attention watcher state override")
     parser.add_argument("--action", choices=["resume", "replace"])
     parser.add_argument("--assignment")

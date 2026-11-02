@@ -14,11 +14,16 @@ c=json.loads(pathlib.Path(os.environ['FIXTURE']).read_text())
 a=sys.argv[1:]; tool=pathlib.Path(sys.argv[0]).name
 result={}
 if tool=='cotal':
- if a[0]=='pending': result={'pending':3,'ackPending':2,'ackFloor':{'stream_seq':5,'consumer_seq':5},'delivered':{'stream_seq':7,'consumer_seq':7},'ids':['DO NOT EMIT']}
+ if a[0]=='pending':
+  assert (a[a.index('--server')+1] if '--server' in a else None)==c.get('server')
+  result=c.get('pendingResult',{'pending':3,'ackPending':2,'ackFloor':{'stream_seq':5,'consumer_seq':5},'delivered':{'stream_seq':7,'consumer_seq':7},'ids':['DO NOT EMIT']})
  elif a[0]=='endpoints':
   if c.get('meshFailure'): sys.exit(1)
   result={'items':c['presence']}
- print(json.dumps({'outcome':'ok','completeness':'complete','result':result}))
+ if a[0]!='pending': assert '--server' not in a
+ partial=a[0] in c.get('partial',[])
+ print(json.dumps({'outcome':'partial' if partial else 'ok','completeness':'partial' if partial else 'complete','result':result}))
+ sys.exit(c.get('exit',4) if partial else 0)
 elif tool=='herdr':
  if a[:2]==['agent','list']: result={'agents':c['agents']}
  elif a[:2]==['workspace','list']: result={'workspaces':[{'workspace_id':'w1','worktree':{'checkout_path':c['worktree']}}]}
@@ -54,7 +59,7 @@ with tempfile.TemporaryDirectory() as temp:
     config = temp / 'config.json'
     argv = temp / 'argv.json'
     env = {**os.environ, 'PATH': str(bin)+os.pathsep+os.environ['PATH'], 'XDG_STATE_HOME': str(temp / 'state'),
-           'FIXTURE': str(config), 'ARGV': str(argv), 'COTAL_SPACE': 'fixture', 'AGENTIC_COTAL_ADMIN_CREDS': str(temp/'absent')}
+           'FIXTURE': str(config), 'ARGV': str(argv), 'COTAL_SPACE': 'fixture', 'AGENTIC_COTAL_ADMIN_CREDS': str(temp/'absent'), 'AGENTIC_COTAL_SERVER': ''}
     snapshot_file = temp / 'state/cotal-seat/fixture/worker.json'
     snapshot_file.parent.mkdir(parents=True)
     def setup(kind='dead'):
@@ -144,6 +149,36 @@ with tempfile.TemporaryDirectory() as temp:
     symlink=temp/'linked.creds'; symlink.symlink_to(creds)
     assert call('--admin-creds',str(symlink))['evidence']['queue']['available'] is False
     print('admin creds mode/symlink + queue single sample sanitization PASS')
+    # Off-registry routing and bounded partial pending reads only.
+    c,data=setup()
+    sample={'pending':3,'ackPending':2,'ackFloor':5,'delivered':7,'ids':['DO NOT EMIT']}
+    for server in (None,'tls://broker.invalid:4222'):
+        c.update(server=server,partial=['pending'],pendingResult=sample)
+        config.write_text(json.dumps(c))
+        row=call('--admin-creds',str(creds),*(['--server',server] if server else []))
+        queue=row['evidence']['queue']
+        assert queue['available'] and queue['completeness']=='partial' and queue['ackFloor']==5 and queue['pending']==3,queue
+        assert 'DO NOT EMIT' not in json.dumps(row) and 'broker.invalid' not in json.dumps(row)
+    env['AGENTIC_COTAL_SERVER']=c['server']
+    assert call('--admin-creds',str(creds))['evidence']['queue']['available']
+    row=call('--admin-creds',str(creds),'--server',c['server'])
+    env['AGENTIC_COTAL_SERVER']='nats://ignored.invalid:4222'
+    assert call('--admin-creds',str(creds),'--server',c['server'])['evidence']['queue']['available']
+    env['AGENTIC_COTAL_SERVER']=''
+    print('pending exit 4 partial, server absent/flag/env precedence, sanitization PASS')
+    c['server']=None
+    for field in ('pending','ackPending','ackFloor'):
+        for value in (None,True,'5',{},-1,float('nan'),float('inf')):
+            c['pendingResult']={**sample,field:value}; config.write_text(json.dumps(c))
+            assert not call('--admin-creds',str(creds))['evidence']['queue']['available']
+    c['pendingResult']=sample
+    for code in (0,2,5):
+        c['exit']=code; config.write_text(json.dumps(c))
+        assert not call('--admin-creds',str(creds))['evidence']['queue']['available']
+    c.pop('exit'); c['partial']=['endpoints']; config.write_text(json.dumps(c))
+    row=call('--admin-creds',str(creds),'--action','resume',expected=2)
+    assert not row['evidence']['presenceComplete']
+    print('partial malformed pending and partial endpoints refused PASS')
     # Fixed shared BPH-81 state contract: seconds (not snapshot milliseconds).
     setup('progressing')
     watch = temp / 'state/agentic-attention-watch/state.json'
