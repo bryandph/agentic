@@ -350,6 +350,94 @@ the shared hook is retained; isolate those checkouts by entering their shells.
 Re-enter
 the affected checkout's shell to install a fresh hook afterwards.
 
+### Seat snapshots and fenced worker recovery
+
+`packages.<system>.pi-seat-snapshot` is an org-neutral Pi extension package;
+load its output with Pi's package configuration or `pi --extension <output>`.
+Consumer enabling is deliberately separate. With `COTAL_SPACE` and `COTAL_NAME`
+it writes `$XDG_STATE_HOME/cotal-seat/<space>/<name>.json` (default state home:
+`~/.local/state`) at session start and every 60 seconds, outside model turns.
+`COTAL_ID` supplies the instance id when available; the native session file and
+cwd come from Pi's lifecycle context. Without a safe space/name it is inert.
+Files use schema `agentic.seat-snapshot/1`, mode 0600, private directories,
+fsync plus atomic rename, and are removed on clean shutdown (including reload).
+No prompts, message contents or credentials enter the snapshot.
+
+**Diagnostic limitation:** qualified against Cotal 0.91.0 and Pi 1.4.0, the
+connector has no supported timer-side diagnostic read API. Pi's nested tool
+caller is tool-execution-scoped, not a lifecycle/timer API. We neither call the
+model nor inspect Cotal's private global runtime map. The writer records
+`connection: null` and `connectionError: "observation unavailable: connector has
+no supported diagnostics API (cotal <version>)"`. This is unavailable, not healthy.
+The nullable connection object remains reserved for a future supported reader.
+
+Both shell transports and this repository's dev shell include:
+
+```sh
+agentic-seat-snapshot --space <space> --name <presence-name> --json
+workbench-worker-recover --worker <name> --worktree <path> --space <space>
+workbench-worker-recover --worker <name> --worktree <path> --space <space> --action resume
+workbench-worker-recover --worker <name> --worktree <path> --space <space> --action replace --assignment <file>
+```
+
+The reader lists records with derived `stale` (older than 180 seconds **or** pid
+dead), liveness and queue fields when available. Unknown schemas are unavailable.
+Readers never delete snapshots. Recovery always emits one JSON record; without
+`--action` it only observes. Classes are `progressing`, `queue-stalled`, `blocked`,
+`hung-process`, `dead`, or `unknown`. A fresh heartbeat is not progress: frozen
+working `activeAt` text of at least 30 minutes signals a hung process; Herdr
+blocked plus unchanged presence of at least 10 minutes signals blocked. Git
+processes in the worktree aged at least 20 minutes include pid/etime. A supported
+fresh connector observation can identify a queue head stalled for 15 minutes.
+Missing diagnostics/ages remain unknown, never an invented healthy state.
+Hung-process output suggests `kill -TERM <pid>` for coordinator review; the tool
+never executes it or kills anything.
+
+Optional broker queue observation uses `--admin-creds`, then
+`AGENTIC_COTAL_ADMIN_CREDS`, then
+`~/.local/share/cotal/<space>/attention-watch/admin.creds`. Only an owned regular
+file with permissions exactly 0600 (no symlink) is accepted. The read-only
+`cotal pending` sample retains only pending/ack-pending counts and sequence
+numbers, never ids/senders/bodies. A single sample cannot prove progress stalled;
+it is labelled `queue: unknown (single sample)`. Presence ages never imply a
+queue stall. Recovery also reads the watcher's published floor observations from
+`$XDG_STATE_HOME/agentic-attention-watch/state.json` (override with
+`--watch-state <path>`), without changing the file. It requires an owned regular
+0600 file, schema `agentic.attention-watch.state/1`, epoch-second `writtenAt`,
+and positive `intervalSeconds`. State older than three intervals is unavailable.
+Only `broker_progress[<presence-name>] = {floor, since, observedAt}` and the
+file's `brokerCoverageSeconds` are inspected: a fresh entry with unchanged floor
+for at least 900 seconds yields `queue-stalled` only when that agent was actually
+observed within twice the coverage interval. Older per-agent observations are
+`queue: unknown (watcher sample too old)`, even if the file is fresh from reading
+other agents. A fresh file without an entry means not stalled per watcher. Missing, malformed,
+stale or unknown-schema state leaves this queue observation unknown. Other
+watcher state keys are ignored, not copied into recovery output.
+
+Recovery refuses unless a known schema-1 snapshot's pid is dead, a complete mesh
+presence read proves the old name offline (absence from complete live presence
+also proves offline), and Herdr proves the single worker pane has no Pi process
+or unrecognized foreground runtime. Two agents for one worktree, live snapshots,
+partial reads, unknown process state and ambiguous panes all refuse. The existing
+`workbench-worker-start` barrier rechecks setup and the available foreground shell.
+
+`resume` passes the old readable session file to `pi-worker --resume` under a new
+presence incarnation `<name>-r<N>`. **Cotal resumes Pi as a history-preserving
+fork**, not an exact reopen: the source session stays untouched. The JSON attempt
+records both the source and the new Pi session returned by startup. `replace`
+requires the assignment and generates a private prompt combining it with branch,
+HEAD, recent commits and uncommitted status. Both preserve the checkout and all
+unresolved work; neither implies predecessor inbox inheritance. Follow-up DM text
+is emitted for the coordinator to send, never sent automatically. The coordinator
+must explicitly reconcile unacknowledged work and obtain assignment acceptance.
+
+A per-worktree lock and private launch receipt under
+`$XDG_STATE_HOME/agentic-worker-recover` serialize recovery and retain uncertain
+launch outcomes. A repeat against the predecessor name refuses even after a lost
+reply; inspect the recorded new incarnation and pane rather than retry blindly.
+Recover a subsequent dead incarnation by its new name. Receipts are fencing
+observations, not a competing work/assignment journal or authorization to merge.
+
 ### Worktree setup and verified teardown
 
 Both shell transports include `workbench-worktree-setup`,

@@ -143,6 +143,48 @@ MUST NOT be assumed to inherit its predecessor's inbox or session.
 - **WHEN** a worktree creation response is lost or the coordinator restarts
 - **THEN** the coordinator inspects existing owned Herdr/Git resources and resumes the binding or escalates uncertainty instead of blindly creating a second worker
 
+### Requirement: Timer-owned seat liveness snapshots
+An opt-in org-neutral Pi extension SHALL atomically write a private schema-1 seat
+snapshot at session start and every 60 seconds outside model turns, and remove
+its own file on clean shutdown. It SHALL record process, native session and
+worktree identity, not message contents or credentials. Unsupported connector
+diagnostics SHALL be explicitly unavailable, never inferred from presence or
+read from a private connector interface. Readers SHALL mark snapshots stale
+when older than 180 seconds or their process is dead, and SHALL treat unknown
+schemas as unavailable without deleting files.
+
+#### Scenario: Unsupported connector diagnostic API
+- **WHEN** the installed connector offers no supported timer-side diagnostic read
+- **THEN** the snapshot retains liveness/session identity with null connection and an explicit versioned unavailability reason
+
+#### Scenario: Clean shutdown
+- **WHEN** the extension runtime shuts down cleanly
+- **THEN** its timer stops and its own snapshot is removed without deleting a successor's file
+
+### Requirement: Explicit fenced recovery command
+The coordinator recovery command SHALL classify without action by default and
+SHALL require explicit resume or replace to launch. It SHALL prove the old Pi
+process gone using a known snapshot, complete mesh observation and Herdr process
+metadata, refusing ambiguous or duplicate ownership and partial observations.
+Recovery SHALL use the existing startup barrier and a new presence incarnation.
+Resume SHALL preserve history through the launcher's native Pi fork semantics;
+replacement SHALL require an explicit assignment plus checkout handover facts.
+A serialized launch receipt SHALL retain uncertain replies to prevent blind
+repeat launches. The command MUST NOT kill processes or automatically send DMs.
+
+#### Scenario: Old worker may still be alive
+- **WHEN** the pid is live, two agents map to the worktree, or absence cannot be proven
+- **THEN** both resume and replace refuse without launching
+
+#### Scenario: Resume source history
+- **WHEN** an explicitly requested resume passes fencing
+- **THEN** startup receives the old session as a fork source under a new presence name and the source file is left untouched
+- **AND** the coordinator receives follow-up DM text and the new session identity when startup observes it
+
+#### Scenario: Lost recovery launcher reply
+- **WHEN** the launcher result is uncertain or the caller repeats the old name
+- **THEN** the retained launch receipt prevents a second launch and directs inspection of the new incarnation
+
 ### Requirement: Evidence and integration retain governance
 Workers SHALL report results/blockers/questions to their coordinator. Decisions
 SHALL route through the operator seat. Repository coordinators SHALL inspect
