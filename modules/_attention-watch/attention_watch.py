@@ -69,12 +69,12 @@ def read_json(path):
         raise Unavailable() from None
 
 
-def command(args, structured=True, allow_partial=False):
+def command(args, structured=True, allow_partial=False, timeout=20):
     # stderr may contain credentials, message IDs, command lines or prompts.
     # Do not propagate it, including through an exception traceback.
     try:
         result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                text=True, timeout=20, check=False)
+                                text=True, timeout=timeout, check=False)
         if result.returncode not in ((0, 4) if allow_partial else (0,)):
             raise Unavailable()
         if not structured:
@@ -95,8 +95,9 @@ def config(path=None):
         'space': 'default', 'workspace_root': str(Path.home()),
         'state_dir': str(xdg / 'agentic-attention-watch'),
         'snapshot_dir': None, 'ci_dir': str(xdg / 'pi-ci-watch'),
-        'admin_creds': None, 'dry_run': False,
-        'thresholds': {'queue': 900, 'broker': 900,
+        'admin_creds': None, 'dry_run': False, 'host': None,
+        'pending_per_poll': 16, 'ci_lookback': 86400,
+        'thresholds': {'broker': 900,
                        'rate_limit': 600, 'approval': 900, 'input': 900,
                        'working': 1800, 'herdr': 600, 'git': 1200, 'snapshot': 180},
         'rate_limits': {'coalesce': 120, 'hourly': 6, 'reminder': 7200},
@@ -120,7 +121,13 @@ def config(path=None):
     if not isinstance(c['space'], str) or not re.fullmatch(r'[A-Za-z0-9_-]+', c['space']):
         raise ValueError('space must be a simple nonempty name')
     c['snapshot_dir'] = c['snapshot_dir'] or str(xdg / 'cotal-seat' / c['space'])
-    c['admin_creds'] = c['admin_creds'] or f'~/.local/share/cotal/{c["space"]}/attention-watch/admin.creds'
+    c['admin_creds'] = c['admin_creds'] or os.environ.get('AGENTIC_COTAL_ADMIN_CREDS') or f'~/.local/share/cotal/{c["space"]}/attention-watch/admin.creds'
+    if c['host'] is not None and (not isinstance(c['host'], str) or not c['host']):
+        raise ValueError('host must be a nonempty string')
+    if not isinstance(c['pending_per_poll'], int) or isinstance(c['pending_per_poll'], bool) or not 1 <= c['pending_per_poll'] <= 100:
+        raise ValueError('pending_per_poll must be an integer from 1 to 100')
+    if number(c['ci_lookback']) == 0:
+        raise ValueError('ci_lookback must be positive')
     for key in ('workspace_root', 'state_dir', 'snapshot_dir', 'ci_dir', 'admin_creds'):
         c[key] = str(Path(c[key]).expanduser().absolute())
     for section in ('thresholds', 'rate_limits'):
@@ -143,17 +150,22 @@ def credential_available(c):
         return False
     except OSError:
         raise ValueError('admin credential metadata unavailable; refusing to start') from None
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & ~0o600:
-        raise ValueError('admin credential must be a regular file owned by this user with mode 0600 or stricter; refusing to start')
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+        raise ValueError('admin credential must be a regular file owned by this user with mode exactly 0600; refusing to start')
     # Metadata only. This process never opens or reads the credential.
     return True
 
 
 class Watcher:
-    def __init__(self, c, state=None, clock=time.time):
+    def __init__(self, c, state=None, clock=time.time, interval=60):
         self.c = c
         self.state = state if state is not None else {'events': {}, 'sent': [], 'resolved': [], 'seen': {}}
+        self.state.update(schema='agentic.attention-watch.state/1', intervalSeconds=interval)
+        self.state.setdefault('broker_progress', {})
+        self.interval = interval
         self.clock = clock
+        self.live_names = set()
+        self.pending_checked = set()
         self.findings = []
         self.sources = {}
         self.seats = []
@@ -187,13 +199,16 @@ class Watcher:
         items = [p for p in data['items'] if p.get('kind') == 'agent'
                  and p.get('reportedStatus') in ('idle', 'waiting', 'working')]
         self.seats = [p['name'] for p in items if p.get('role') == 'seat']
-        self.observations['S1'] = {'livePeers': len(items), 'snapshotBoundLocalPeers': sum(p['name'] in self.local_names for p in items)}
+        all_count = len(items)
+        # Advisory host tags may narrow observations, never seat discovery.
+        # Untagged agents stay included; snapshots are optional enrichment.
+        host = self.c['host']
+        items = [p for p in items if host is None or
+                 (p.get('card', {}).get('meta', p.get('meta', {})) or {}).get('host') in (None, host)]
+        self.live_names = {p['name'] for p in items}
+        self.observations['S1'] = {'livePeers': all_count, 'observedPeers': len(items)}
         for p in items:
             name = p['name']
-            # Restrict work observations to the host, as established by S3/S4.
-            # Global seat discovery remains global for unambiguous DM routing.
-            if name not in self.local_names:
-                continue
             ages = str(p.get('facts', {}).get('ages', ''))
             condition = str(p.get('facts', {}).get('condition', ''))
             text = condition + ' ' + ages + ' ' + str(p.get('activityAge', ''))
@@ -208,24 +223,36 @@ class Watcher:
 
     def pending(self, items, now):
         if not credential_available(self.c):
-            self.unavailable('S2')
+            self.sources['S2'] = 'unavailable: admin credential absent (optional)'
             return
         self.sources['S2'] = 'available; redelivery unavailable in Cotal 0.91; candidate ages bounded'
-        self.observations['S2'] = {'inspectedPeers': 0}
-        for p in items:
-            if p['name'] not in self.local_names:
-                continue
+        self.observations['S2'] = {'inspectedPeers': 0, 'deferredPeers': len(items)}
+        items = sorted(items, key=lambda p: p['name'])
+        start = self.state.get('pending_cursor', 0) % max(1, len(items))
+        selected = (items[start:] + items[:start])[:self.c['pending_per_poll']]
+        deadline = time.monotonic() + self.interval
+        for p in selected:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             name = p['name']
-            data = command(['cotal', 'pending', name, '--space', self.c['space'], '--json',
-                            '--creds', self.c['admin_creds']], allow_partial=True)
+            self.state['pending_cursor'] = (items.index(p) + 1) % len(items)
+            self.pending_checked.add(name)
+            data = command(['cotal', 'pending', name, '--space', self.c['space'],
+                            '--creds', self.c['admin_creds'], '--json'],
+                           allow_partial=True, timeout=min(20, remaining))
             self.observations['S2']['inspectedPeers'] += 1
+            self.observations['S2']['deferredPeers'] -= 1
             # Strict projection: no IDs, sender, subjects, bodies, durable names,
-            # sequences, warnings or external diagnostics escape this function.
+            # warnings or external diagnostics escape this function.
             pending = number(data.get('pending'))
             ack = number(data.get('ackPending'))
             count = pending + ack
             floor = number(data.get('ackFloor'))
             delivered = number(data.get('delivered'))
+            if int(floor) != floor or int(delivered) != delivered:
+                raise Unavailable()
+            floor, delivered = int(floor), int(delivered)
             progress = self.state.setdefault('broker_progress', {})
             previous = progress.get(name)
             if count == 0:
@@ -247,10 +274,16 @@ class Watcher:
 
     def snapshots(self, now):
         root = Path(self.c['snapshot_dir'])
+        if not root.exists():
+            self.sources['S3'] = 'unavailable: no snapshots (extension not enabled?)'
+            self.observations['S3'] = {'snapshotFiles': 0}
+            return
         if not root.is_dir():
             raise Unavailable()
         paths = sorted(root.glob('*.json'))
         self.observations['S3'] = {'snapshotFiles': len(paths)}
+        if not paths:
+            self.sources['S3'] = 'unavailable: no snapshots (extension not enabled?)'
         for path in paths:
             data = read_json(path)
             if data.get('schema') != 'agentic.seat-snapshot/1' or data.get('space') != self.c['space']:
@@ -263,15 +296,10 @@ class Watcher:
             written = stamp(data['writtenAt'])
             age = max(0, now - written)
             live = alive(data['pid'])
-            if age > self.c['thresholds']['snapshot'] or not live:
-                self.add('snapshot-stale', name, f'write age={int(age)}s; process alive={live}', self.c['thresholds']['snapshot'])
-            connection = data.get('connection')
-            if not isinstance(connection, dict):
-                raise Unavailable()
-            stalled = number(connection.get('automaticQueueStalledForMs', 0)) / 1000
-            count = number(connection.get('automaticCount', 0))
-            if count and stalled >= self.c['thresholds']['queue']:
-                self.add('queue-stalled', name, f'automaticCount={count}; head stalled={int(stalled)}s', self.c['thresholds']['queue'])
+            if name in self.live_names and (age > self.c['thresholds']['snapshot'] or not live):
+                self.add('snapshot-stale', name, f'seat process gone or wedged; write age={int(age)}s; process alive={live}; presence still live', self.c['thresholds']['snapshot'])
+            # Optional enrichment is liveness-only. A null connection is the
+            # expected snapshot-writer contract, not a queue-health failure.
 
     def herdr(self, now):
         data = command(['herdr', 'agent', 'list'])
@@ -332,9 +360,12 @@ class Watcher:
         if not root.is_dir():
             raise Unavailable()
         paths = sorted(root.glob('sessions/*/watches/*/state.json'))
-        self.observations['S6'] = {'watchFiles': len(paths), 'pendingWatches': 0}
+        self.observations['S6'] = {'watchFiles': len(paths), 'pendingWatches': 0, 'ignoredOldWatchStates': 0}
         for path in paths:
             data = read_json(path)
+            if 'observedAt' in data and now - stamp(data['observedAt']) > self.c['ci_lookback']:
+                self.observations['S6']['ignoredOldWatchStates'] += 1
+                continue
             if not (data.get('phase') == 'pending' or
                     (data.get('phase') == 'running' and data.get('lastObservation', {}).get('phase') == 'pending')):
                 continue
@@ -353,18 +384,15 @@ class Watcher:
                          f'3 x max poll ({3*interval}s), dead pid or expired deadline',
                          human=self.sessions.get(watch.get('owner', {}).get('sessionFile')) in self.seats)
 
+        ignored = self.observations['S6']['ignoredOldWatchStates']
+        if ignored:
+            self.sources['S6'] = f'available; ignored: {ignored} old watch states'
+
     def observe(self):
         now = self.clock()
         self.findings, self.sources, self.local_names, self.context, self.sessions = [], {}, set(), {}, {}
         self.observations = {}
-        # Snapshots establish which presence records belong to this host.
-        for source, read in [('S3', self.snapshots), ('S4', self.herdr)]:
-            self.current_source = source
-            self.sources[source] = 'available'
-            try:
-                read(now)
-            except (Unavailable, OSError, KeyError, TypeError, ValueError):
-                self.unavailable(source)
+        self.live_names, self.pending_checked = set(), set()
         self.current_source = 'S1'
         self.sources['S1'] = 'available'
         try:
@@ -378,7 +406,7 @@ class Watcher:
             self.pending(items, now)
         except (Unavailable, OSError, KeyError, TypeError):
             self.unavailable('S2')
-        for source, read in [('S5', self.git), ('S6', self.ci)]:
+        for source, read in [('S3', self.snapshots), ('S4', self.herdr), ('S5', self.git), ('S6', self.ci)]:
             self.current_source = source
             self.sources[source] = 'available'
             try:
@@ -407,8 +435,10 @@ class Watcher:
         for key, event in events.items():
             if key not in current and event['active']:
                 source = event['finding'].get('source')
-                if source and self.sources.get(source) == 'unavailable' and event['finding']['kind'] != 'source-unavailable':
+                if source and str(self.sources.get(source, '')).startswith('unavailable') and event['finding']['kind'] != 'source-unavailable':
                     continue  # An unreadable source is unknown, never a resolution.
+                if source == 'S2' and event['finding']['subject'] in self.live_names and event['finding']['subject'] not in self.pending_checked:
+                    continue  # Deferred by per-poll cap, not proven resolved.
                 event['active'] = False
                 if event['last_dm'] is not None or event['notified']:
                     self.state['resolved'].append(event['id'])
@@ -424,7 +454,9 @@ class Watcher:
             if not event['active']:
                 continue
             finding = event['finding']
-            if finding.get('source') and self.sources.get(finding['source']) == 'unavailable' and finding['kind'] != 'source-unavailable':
+            if finding.get('source') and str(self.sources.get(finding['source'], '')).startswith('unavailable') and finding['kind'] != 'source-unavailable':
+                continue
+            if finding.get('source') == 'S2' and finding['kind'] != 'source-unavailable' and finding['subject'] not in self.pending_checked:
                 continue
             human = finding['human'] or len(self.seats) != 1 or finding['subject'] in self.seats
             # Once routed to a human, this transition is never subsequently DMed.
@@ -469,20 +501,29 @@ class Watcher:
                 'pending': sum(e['active'] and e['last_dm'] is None and not e['notified'] for e in self.state['events'].values())}
 
 
-def save(path, data):
+def save(path, data, now=None):
+    if data.get('schema') == 'agentic.attention-watch.state/1':
+        data['writtenAt'] = float(time.time() if now is None else now)
     tmp = path.with_suffix('.tmp')
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
     with os.fdopen(fd, 'w') as handle:
         json.dump(data, handle, sort_keys=True)
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(tmp, path)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('run', 'status'), nargs='?', default='run')
     parser.add_argument('--config')
+    parser.add_argument('--admin-creds', help='override config/env admin credential pathname')
     parser.add_argument('--interval', type=float, default=60)
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
@@ -490,18 +531,20 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         c = config(args.config)
+        if args.admin_creds:
+            c['admin_creds'] = str(Path(args.admin_creds).expanduser().absolute())
         credential_available(c)  # Refuse before opening state or running any command.
         root = Path(c['state_dir'])
         if args.command == 'status':
             try:
                 report = read_json(root / 'status.json')
             except Unavailable:
-                report = {'status': 'not yet observed', 'sources': {'S2': 'available' if credential_available(c) else 'unavailable'}}
+                report = {'status': 'not yet observed', 'sources': {'S2': 'available' if credential_available(c) else 'unavailable: admin credential absent (optional)'}}
             if not credential_available(c):
-                report.setdefault('sources', {})['S2'] = 'unavailable'
+                report.setdefault('sources', {})['S2'] = 'unavailable: admin credential absent (optional)'
             print(json.dumps(report, indent=2 if args.json else None))
             return 0
-        if args.interval <= 0:
+        if not math.isfinite(args.interval) or args.interval <= 0:
             raise ValueError('interval must be positive')
         dry = args.dry_run or c['dry_run']
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -512,7 +555,7 @@ def main(argv=None):
                 raise ValueError('another watcher holds this state directory') from None
             state_path = root / 'state.json'
             state = read_json(state_path) if state_path.exists() else None
-            watcher = Watcher(c, state)
+            watcher = Watcher(c, state, interval=args.interval)
             while True:
                 watcher.observe()
                 deliveries = watcher.deliver(dry)
@@ -542,7 +585,7 @@ def main(argv=None):
         message = 'watcher state/config unavailable; refusing to start'
         exc = sys.exc_info()[1]
         if isinstance(exc, ValueError) and str(exc) in {
-            'admin credential must be a regular file owned by this user with mode 0600 or stricter; refusing to start',
+            'admin credential must be a regular file owned by this user with mode exactly 0600; refusing to start',
             'admin credential metadata unavailable; refusing to start',
             'another watcher holds this state directory', 'interval must be positive'}:
             message = str(exc)

@@ -81,6 +81,8 @@ class Sandbox(unittest.TestCase):
 
     def credential(self, mode=0o600):
         path = Path(self.c['admin_creds'])
+        if path.exists():
+            path.chmod(0o600)
         path.write_text(SENTINEL)
         path.chmod(mode)
 
@@ -98,7 +100,7 @@ class Sandbox(unittest.TestCase):
 
     def restart(self):
         state_path = self.root / 'state.json'
-        a.save(state_path, self.w.state)
+        a.save(state_path, self.w.state, now=self.now)
         self.w = a.Watcher(self.c, a.read_json(state_path), clock=lambda: self.now)
 
     def emit(self):
@@ -152,15 +154,17 @@ class Sandbox(unittest.TestCase):
         self.assertTrue(deliveries)
         self.assertNotIn(SENTINEL, json.dumps(self.w.state) + json.dumps(self.w.report()) + self.delivery_path.read_text())
 
-    def test_s3_queue_and_stale_snapshot(self):
-        self.snapshot('worker', connection={'automaticCount': 2, 'automaticQueueStalledForMs': 899000})
+    def test_s3_optional_liveness_only(self):
+        self.snapshot('worker', connection=None, connectionError='queue diagnostics unavailable')
+        self.assertNotIn('source-unavailable', self.observe())
         self.assertNotIn('queue-stalled', self.observe())
-        self.snapshot('worker', connection={'automaticCount': 2, 'automaticQueueStalledForMs': 900000})
-        self.assertIn('queue-stalled', self.observe())
         self.now += 181
         self.assertIn('snapshot-stale', self.observe())
         self.snapshot('worker', pid=999999999)
         self.assertIn('snapshot-stale', self.observe())
+        self.fixture['cotal:endpoints']['items'][1]['reportedStatus'] = 'offline'
+        self.assertNotIn('snapshot-stale', self.observe())
+        self.fixture['cotal:endpoints']['items'][1]['reportedStatus'] = 'working'
         self.snapshot('worker', schema='future')
         self.observe()
         self.assertEqual(self.w.sources['S3'], 'unavailable')
@@ -287,7 +291,7 @@ class Sandbox(unittest.TestCase):
         self.credential(0o644)
         result = cli('run', '--once', '--dry-run')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('mode 0600', result.stderr)
+        self.assertIn('mode exactly 0600', result.stderr)
         self.assertFalse(self.delivery_path.exists())
         self.credential()
         result = cli('run', '--once', '--dry-run')
@@ -296,7 +300,7 @@ class Sandbox(unittest.TestCase):
         Path(self.c['admin_creds']).unlink()
         result = cli('run', '--once', '--dry-run')
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(json.loads(result.stdout)['report']['sources']['S2'], 'unavailable')
+        self.assertIn('unavailable: admin credential absent', json.loads(result.stdout)['report']['sources']['S2'])
         self.assertFalse(self.delivery_path.exists())
         self.assertFalse((Path(self.c['state_dir']) / 'state.json').exists())
         result = cli('status', '--json')
@@ -332,6 +336,8 @@ class Sandbox(unittest.TestCase):
     def test_cli_persists_reservation_before_failed_delivery(self):
         config_path = self.root / 'config.json'
         config_path.write_text(json.dumps(self.c))
+        self.credential()
+        self.fixture['fail'] = ['cotal:pending']
         self.fixture['deliveryExit'] = 1
         self.write_fixture()
         state = {'events': {}, 'sent': [], 'resolved': [], 'seen': {}}
@@ -347,12 +353,122 @@ class Sandbox(unittest.TestCase):
         args = [sys.executable, str(ROOT / 'attention_watch.py'), '--config', str(config_path), 'run', '--once']
         result = subprocess.run(args, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(a.read_json(state_path)['schema'], 'agentic.attention-watch.state/1')
+        self.assertEqual(a.read_json(state_path)['intervalSeconds'], 60)
+        self.assertIsInstance(a.read_json(state_path)['writtenAt'], float)
         self.assertTrue(a.read_json(state_path)['events']['source-unavailable:S2']['notified'])
         self.assertEqual(a.read_json(Path(self.c['state_dir']) / 'status.json')['deliveryFailures'], 1)
         sent = self.delivery_path.read_text()
         subprocess.run(args, capture_output=True, text=True, check=True)
         self.assertEqual(self.delivery_path.read_text(), sent)
         self.assertNotIn(SENTINEL, sent + result.stdout + result.stderr)
+
+    def test_no_snapshots_still_observes_s1_s2_absence_is_quiet(self):
+        for path in Path(self.c['snapshot_dir']).glob('*.json'):
+            path.unlink()
+        Path(self.c['snapshot_dir']).rmdir()
+        self.fixture['cotal:endpoints']['items'][1]['facts']['condition'] = 'rate_limit for 12m'
+        self.assertIn('rate_limit', self.observe())
+        self.assertEqual([f for f in self.w.findings if f['kind'] == 'source-unavailable'], [])
+        self.assertIn('no snapshots', self.w.sources['S3'])
+        self.assertIn('credential absent', self.w.sources['S2'])
+        self.credential()
+        self.observe()
+        self.now += 900
+        self.restart()
+        self.assertIn('broker-backlog', self.observe())
+        backlog_subjects = {f['subject'] for f in self.w.findings if f['kind'] == 'broker-backlog'}
+        self.assertEqual(backlog_subjects, {'operator', 'worker'})
+        preview = self.w.deliver(dry_run=True)
+        self.assertTrue(any(d['route'] == 'notification' and 'subject=operator' in d['text'] for d in preview))
+        self.assertTrue(any(d['route'] == 'dm' and 'subject=worker' in d['text'] for d in preview))
+        self.assertFalse(any('subject=S3' in d['text'] or 'subject=S2' in d['text'] for d in preview))
+
+    def test_presence_host_filter_on_off_and_untagged(self):
+        items = self.fixture['cotal:endpoints']['items']
+        items[0]['card'] = {'meta': {'host': 'other-host'}}
+        items[1]['card'] = {'meta': {'host': 'this-host'}}
+        items.extend([self.peer('remote'), self.peer('untagged')])
+        items[2]['card'] = {'meta': {'host': 'other-host'}}
+        for item in items:
+            item['facts']['condition'] = 'approval for 20m'
+        self.observe()
+        self.assertEqual({f['subject'] for f in self.w.findings if f['kind'] == 'approval'}, {'operator', 'worker', 'remote', 'untagged'})
+        self.c['host'] = 'this-host'
+        self.observe()
+        self.assertEqual({f['subject'] for f in self.w.findings if f['kind'] == 'approval'}, {'worker', 'untagged'})
+        self.assertEqual(self.w.seats, ['operator'])  # discovery is never host-filtered
+        self.credential()
+        self.observe()
+        self.assertEqual(set(self.w.state['broker_progress']), {'worker', 'untagged'})
+
+    def test_s2_cap_rotates_across_restart_and_interval_budget(self):
+        self.credential()
+        self.c['pending_per_poll'] = 1
+        self.observe()
+        self.assertEqual(set(self.w.state['broker_progress']), {'operator'})
+        self.assertEqual(self.w.observations['S2']['deferredPeers'], 1)
+        self.restart()
+        self.observe()
+        self.assertEqual(set(self.w.state['broker_progress']), {'operator', 'worker'})
+        self.now += 900
+        self.observe()  # operator is checked; worker is deferred, not resolved
+        self.w.deliver()
+        self.observe()  # worker checked; operator deferred
+        self.w.deliver()
+        self.assertTrue(self.w.state['events']['broker-backlog:operator']['active'])
+        self.assertTrue(self.w.state['events']['broker-backlog:worker']['active'])
+        self.c['pending_per_poll'] = 16
+        with patch.object(a.time, 'monotonic', side_effect=[0, 1, 61]):
+            with patch.object(a, 'command', return_value=self.fixture['cotal:pending']) as run:
+                self.w.pending(self.fixture['cotal:endpoints']['items'], self.now)
+                self.assertEqual(run.call_count, 1)
+                self.assertLessEqual(run.call_args.kwargs['timeout'], 59)
+
+    def test_s6_lookback_ignores_old_states_recent_dead_still_fires(self):
+        self.ci_fixture(observedAt=self.now - 86401, pid=999999999)
+        self.assertNotIn('ci-watch-stale', self.observe())
+        self.assertEqual(self.w.observations['S6']['ignoredOldWatchStates'], 1)
+        self.assertIn('ignored: 1 old watch states', self.w.sources['S6'])
+        self.c['ci_lookback'] = 172800
+        self.assertIn('ci-watch-stale', self.observe())
+        self.c['ci_lookback'] = 86400
+        self.ci_fixture(observedAt=self.now - 60, pid=999999999)
+        self.assertIn('ci-watch-stale', self.observe())
+
+    def test_public_state_contract_atomic_metadata_and_floor_shape(self):
+        self.credential()
+        self.observe()
+        self.restart()
+        state_path = self.root / 'state.json'
+        data = a.read_json(state_path)
+        self.assertEqual(data['schema'], 'agentic.attention-watch.state/1')
+        self.assertEqual(data['writtenAt'], self.now)
+        self.assertIsInstance(data['writtenAt'], float)
+        self.assertEqual(data['intervalSeconds'], 60)
+        self.assertEqual(data['broker_progress'], {'operator': {'floor': 1, 'since': self.now}, 'worker': {'floor': 1, 'since': self.now}})
+        self.assertEqual(state_path.stat().st_mode & 0o777, 0o600)
+        self.now += 181
+        self.assertLess(data['writtenAt'], self.now - 3 * data['intervalSeconds'])
+        self.fixture['cotal:pending']['pending'] = 0
+        self.observe()
+        self.restart()
+        self.assertEqual(a.read_json(state_path)['broker_progress'], {})
+        self.assertEqual(a.read_json(state_path)['writtenAt'], self.now)
+
+    def test_admin_creds_env_flag_and_exact_mode(self):
+        self.credential(0o400)
+        with self.assertRaisesRegex(ValueError, 'exactly 0600'):
+            a.credential_available(self.c)
+        self.credential()
+        with patch.dict(os.environ, {'AGENTIC_COTAL_ADMIN_CREDS': self.c['admin_creds']}):
+            self.assertEqual(a.config()['admin_creds'], self.c['admin_creds'])
+            cfg = self.root / 'minimal.json'
+            cfg.write_text(json.dumps({'state_dir': self.c['state_dir'], 'admin_creds': '/does/not/exist'}))
+            result = subprocess.run([sys.executable, str(ROOT / 'attention_watch.py'), 'status', '--json', '--config', str(cfg), '--admin-creds', self.c['admin_creds']], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['sources']['S2'], 'available')
+            self.assertNotIn(SENTINEL, result.stdout + result.stderr)
 
     def test_delivery_bounds_cannot_be_loosened(self):
         path = self.root / 'config.toml'

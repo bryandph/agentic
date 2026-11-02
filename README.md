@@ -33,8 +33,9 @@ Hard rules:
 
 ## Host attention watcher (opt-in)
 
-`agentic-attention-watch` is a Python daemon, not an agent. It observes one
-host outside model turns and escalates to the single live Cotal peer with
+`agentic-attention-watch` is a Python daemon, not an agent. It runs on one
+host outside model turns, observes live mesh agents plus host-local processes,
+and escalates to the single live Cotal peer with
 `role=seat`. It never kills, restarts, resends, approves, sends keys, or injects
 prompts. The command is in `devenvLib.packages`, this repository's contributor
 shell, and `packages.<system>.agentic-attention-watch`. Service placement and
@@ -63,9 +64,11 @@ state_dir = "~/.local/state/agentic-attention-watch"
 # snapshot_dir = "~/.local/state/cotal-seat/default"
 # ci_dir = "~/.local/state/pi-ci-watch"
 # dry_run = true
+# host = "workstation"          # optional advisory presence card.meta.host filter
+pending_per_poll = 16           # rotating per-poll cap; 1..100
+ci_lookback = 86400             # ignore watch states older than 24 hours
 
 [thresholds]
-queue = 900
 broker = 900
 rate_limit = 600
 approval = 900
@@ -82,22 +85,25 @@ reminder = 7200
 ```
 
 State/snapshot/CI defaults honor `XDG_STATE_HOME`. The credential default uses
-`~/.local/share/cotal/<space>/attention-watch/admin.creds`. An absent credential
-makes S2 **unavailable**, never healthy or zero. Before starting any subprocess,
-the watcher checks credential metadata: it refuses a symlink, nonregular file,
-wrong owner, or permissions looser than 0600. It never opens, logs, prints or copies
+`~/.local/share/cotal/<space>/attention-watch/admin.creds`. Override it with
+`AGENTIC_COTAL_ADMIN_CREDS`, config `admin_creds`, or `--admin-creds <path>`
+(in increasing precedence). An absent credential makes S2 **unavailable**, never
+healthy or zero, but is optional and does not notify the human. Before starting
+any subprocess, the watcher checks credential metadata: it refuses a symlink,
+nonregular file, wrong owner, or permission bits other than **exactly 0600**.
+It never opens, logs, prints or copies
 the credential. Provision it separately; never put credentials in Nix/config.
 Only Cotal's admin reader receives its pathname. External stderr and failed-command
 stdout are discarded, not included in logs, status or notifications.
 
 | Source | Observation and default escalation |
 |---|---|
-| S1 Cotal presence | `cotal endpoints --json`, using `facts.condition`, text ages in `facts.ages` and `activityAge`. Rate limit ≥10 min, approval/input ≥15 min, or working with last `active` ≥30 min. `unchanged` alone is not proof of a frozen turn. Only S3-bound local peers are observed; seat routing uses the whole live roster. |
-| S2 broker | `cotal pending <peer> --json --creds <path>` for local live peers. Nonempty `pending + ackPending` with an unchanged `ackFloor` for ≥15 min. Floor advances or empty backlog reset the persisted clock. Only counts, floor/delivered sequence numbers, and candidate timestamps are projected. Candidate ages are informational: a **bounded sample of recent candidates, not the oldest held**. Cotal 0.91 exposes no redelivery count: it is unavailable, not zero, and there is no active redelivery rule. No message IDs, senders, subjects or bodies are retained. |
-| S3 seat snapshots | `cotal-seat/<space>/*.json`, schema `agentic.seat-snapshot/1`: queue head without progress ≥15 min; stale write (>3×60 s) or dead writer process. Unknown schema/missing directory/connection is unavailable, never healthy. Snapshots bind local presence names and working directories. |
+| S1 Cotal presence | `cotal endpoints --json`, using `facts.condition`, text ages in `facts.ages` and `activityAge`. Rate limit ≥10 min, approval/input ≥15 min, or working with last `active` ≥30 min. `unchanged` alone is not proof of a frozen turn. All live agents are observed without any snapshot dependency. Optional `host` limits work observations to matching `card.meta.host` (or flattened `meta.host`), including untagged agents; seat routing always uses the whole live roster. |
+| S2 broker | `cotal pending <peer> --space <space> --creds <path> --json` for **every** live agent, including coordinators, workers and the operator seat. `pending_per_poll` bounds each poll; a persisted cursor rotates coverage across polls/restarts. The S2 subprocess budget is at most one run interval (each call ≤20 s). Deferred peers are unknown, not resolved; status reports inspected/deferred counts. Nonempty `pending + ackPending` with an unchanged `ackFloor` for ≥15 min. Floor advances or empty backlog reset the persisted clock. Only counts, floor/delivered sequence numbers, and candidate timestamps are projected. Candidate ages are informational: a **bounded sample of recent candidates, not the oldest held**. Cotal 0.91 exposes no redelivery count: it is unavailable, not zero, and there is no active redelivery rule. No message IDs, senders, subjects or bodies are retained. |
+| S3 seat snapshots | Optional `cotal-seat/<space>/*.json`, schema `agentic.seat-snapshot/1`, used for liveness and owner enrichment only. An existing snapshot whose write is stale (>3×60 s) or PID is dead **while its presence remains live** escalates as “seat process gone or wedged”. Missing snapshots produce status `unavailable: no snapshots (extension not enabled?)`, not a finding or notification. `connection: null` plus `connectionError` is normal: no queue-health inference or failure. An existing unreadable/unknown-schema snapshot is unavailable and notifies the human. |
 | S4 Herdr | `herdr agent list` and `herdr pane process-info --pane`, limited to workspace-root descendants. Blocked/waiting/input/approval observed continuously ≥10 min; first-observed clocks persist over restarts. Raw argv, command lines and terminal text are never emitted or retained. Ambiguous owner → human notification. |
 | S5 git | `ps` elapsed time and `lsof` cwd: git/git-remote/git-lfs process ≥20 min with cwd under workspace root (path boundary checked). No process arguments are inspected. Unknown owner or seat-owned git work → human notification. |
-| S6 CI watch | `pi-ci-watch/sessions/*/watches/*/state.json` plus sibling `watch.json`. Pending watches (including actual `phase=running` with `lastObservation.phase=pending`) escalate when `observedAt` exceeds 3× maximum poll cadence, PID is dead, or deadline has passed. Current exponential interval is not persisted, so the maximum is the conservative bound. Terminal/cancelled/error watches are ignored. |
+| S6 CI watch | `pi-ci-watch/sessions/*/watches/*/state.json` plus sibling `watch.json`. Pending watches (including actual `phase=running` with `lastObservation.phase=pending`) escalate when `observedAt` exceeds 3× maximum poll cadence, PID is dead, or deadline has passed. Current exponential interval is not persisted, so the maximum is the conservative bound (default 600 s for empty cadence). Only states observed within `ci_lookback` (default 24 h) are considered. Older state is counted as `ignored: N old watch states` in status and never escalated. Terminal/cancelled/error watches are ignored. |
 
 The durable ID is `<kind>:<subject>:<since>`, where `since` is the first observation
 of that firing transition; changing rounded text ages never churns the ID. Delivery
@@ -107,7 +113,9 @@ delivery bounds. The next DM lists resolutions since the last DM; resolutions ne
 send a standalone message. Unreadable sources do not resolve previously firing work.
 
 A seat's own condition, queue/backlog or snapshot, zero/multiple live seats, and
-unreadable sources use `herdr notification show` instead of a DM. Human notifications
+configured/expected sources that fail to read use `herdr notification show` instead
+of a DM. Absent optional S2 credentials and S3 snapshots are status-only, never
+notifications. Human notifications
 are at most once per transition ID, with no reminder and no subsequent DM for that
 same ID. Only the single live seat may receive a DM; coordinators/workers never do.
 Every escalation includes kind, subject, observation time, facts/ages, threshold,
@@ -115,7 +123,37 @@ ID and a suggested manual owner/action. A human notification is a routing fallba
 not evidence of DM delivery or operator acknowledgement.
 
 The state directory stores atomically replaced JSON and an exclusive host lock;
-reuse it across restarts. Delivery IDs are reserved **before** executing the send.
+reuse it across restarts. The public read-only recovery contract is
+`<state_dir>/state.json`, with default path
+`${XDG_STATE_HOME:-$HOME/.local/state}/agentic-attention-watch/state.json`:
+
+```json
+{
+  "schema": "agentic.attention-watch.state/1",
+  "writtenAt": 1793500000.0,
+  "intervalSeconds": 60,
+  "broker_progress": {
+    "example-worker": {"floor": 42, "since": 1793499100.0}
+  }
+}
+```
+
+The file also contains private delivery/deduplication keys; readers must ignore
+them. `writtenAt` is epoch **seconds**, refreshed on every state save;
+`intervalSeconds` is the configured run interval. Unknown schema, missing fields
+or `writtenAt < now - 3 * intervalSeconds` means observation unavailable/stale.
+`broker_progress` is keyed by exact presence name. Each entry contains `floor`
+(the integer `ackFloor` sequence last observed) and `since` (epoch seconds when
+that floor was first seen with a nonempty `pending + ackPending` backlog).
+The floor moving resets `since`; empty backlog removes the entry. A record only
+exists while the last observed backlog is nonempty. Per-poll caps may defer a
+peer; a fresh file is not proof every peer was read in that poll. Readers must
+never treat this read-only diagnostic as authority to act.
+
+State replacement is atomic: write a mode-0600 temporary file, flush/fsync,
+`os.replace`, then fsync the containing directory, so concurrent readers see a
+complete old or new file. The file and floor clock survive watcher restarts.
+Delivery IDs are reserved **before** executing the send.
 Failed/ambiguous sends are not blindly retried; `status` reports delivery failures.
 DM reminders remain bounded; human notification attempts stay at-most-once. Inspect
 failures manually. Run one daemon per host with a unique state directory; nothing
