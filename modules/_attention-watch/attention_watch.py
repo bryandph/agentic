@@ -4,6 +4,7 @@
 import argparse
 import datetime as dt
 import fcntl
+import fnmatch
 import json
 import math
 import os
@@ -111,7 +112,7 @@ def config(path=None, server=None):
         'space': 'default', 'workspace_root': str(Path.home()),
         'state_dir': str(xdg / 'agentic-attention-watch'),
         'snapshot_dir': None, 'ci_dir': str(xdg / 'pi-ci-watch'),
-        'admin_creds': None, 'server': None, 'dry_run': False, 'host': None,
+        'admin_creds': None, 'server': None, 'dry_run': False, 'host': None, 'contact': None,
         'pending_per_poll': 16, 'ci_lookback': 86400,
         'thresholds': {'broker': 900,
                        'rate_limit': 600, 'approval': 900, 'input': 900,
@@ -134,6 +135,15 @@ def config(path=None, server=None):
             else:
                 defaults[key] = val
     c = defaults
+    contact = c['contact']
+    if contact is not None:
+        if (not isinstance(contact, dict) or set(contact) - {'name', 'pattern', 'local'}
+                or len(set(contact) & {'name', 'pattern'}) != 1
+                or not isinstance(contact.get('local', False), bool)):
+            raise ValueError('invalid contact config')
+        selector = 'name' if 'name' in contact else 'pattern'
+        if not isinstance(contact[selector], str) or not contact[selector].strip():
+            raise ValueError('invalid contact config')
     c['server'] = validate_server(server if server is not None else c['server'] if c['server'] is not None else os.environ.get('AGENTIC_COTAL_SERVER'))
     if not isinstance(c['space'], str) or not re.fullmatch(r'[A-Za-z0-9_-]+', c['space']):
         raise ValueError('space must be a simple nonempty name')
@@ -158,6 +168,26 @@ def config(path=None, server=None):
     c['rate_limits']['hourly'] = min(6, c['rate_limits']['hourly'])
     c['rate_limits']['reminder'] = max(7200, c['rate_limits']['reminder'])
     return c
+
+
+def resolve_contact(c, seats, snapshots):
+    """Select this watcher instance's DM target on this host, using S3 validation.
+
+    This is not an exclusive, fenced contact across hosts: two watchers may
+    select different seats. Cross-host selection needs a shared epoch,
+    conditional transfer and fail-closed validation, all out of scope here.
+    """
+    contact = c['contact']
+    if contact is None:
+        return (seats[0], 'single live seat') if len(seats) == 1 else (
+            None, 'no live seat' if not seats else 'multiple live seats')
+    matches = [name for name in seats
+               if (name == contact['name'] if 'name' in contact else
+                   fnmatch.fnmatchcase(name, contact['pattern']))
+               and (not contact.get('local', False) or name in snapshots)]
+    if len(matches) == 1:
+        return matches[0], 'selected contact resolved'
+    return None, 'selected contact absent' if not matches else 'selected contact ambiguous'
 
 
 def credential_available(c):
@@ -188,6 +218,7 @@ class Watcher:
         self.sources = {}
         self.seats = []
         self.local_names = set()
+        self.contact_snapshots = set()
         self.context = {}
         self.sessions = {}
         self.current_source = None
@@ -245,7 +276,7 @@ class Watcher:
             self.sources['S2'] = 'unavailable: admin credential absent (optional)'
             return
         self.sources['S2'] = 'available; redelivery unavailable in Cotal 0.91; candidate ages bounded'
-        self.observations['S2'] = {'inspectedPeers': 0, 'deferredPeers': len(items)}
+        self.observations['S2'] = {'inspectedPeers': 0, 'deferredPeers': len(items), 'suppressedPeers': 0}
         items = sorted(items, key=lambda p: p['name'])
         start = self.state.get('pending_cursor', 0) % max(1, len(items))
         selected = (items[start:] + items[:start])[:self.c['pending_per_poll']]
@@ -289,7 +320,14 @@ class Watcher:
                               if isinstance(row, dict) and 'ts' in row]
             candidate_age = max(candidate_ages, default=0)
             local_age = now - since
-            if count and local_age >= self.c['thresholds']['broker']:
+            active = text_age(' '.join(str(v) for v in (
+                p.get('facts', {}).get('condition', ''), p.get('facts', {}).get('ages', ''),
+                p.get('activityAge', ''))), 'active')
+            busy = (p['reportedStatus'] == 'working' and active is not None
+                    and active < self.c['thresholds']['working'])
+            if count and local_age >= self.c['thresholds']['broker'] and busy:
+                self.observations['S2']['suppressedPeers'] += 1
+            elif count and local_age >= self.c['thresholds']['broker']:
                 self.add('broker-backlog', name,
                          f'pending={pending}; ackPending={ack}; ackFloor={floor}; delivered={delivered}; unchanged floor with backlog={int(local_age)}s; bounded sample of recent candidates age={int(candidate_age)}s (not the oldest held); redelivery unavailable in this Cotal version',
                          self.c['thresholds']['broker'])
@@ -308,16 +346,23 @@ class Watcher:
             self.sources['S3'] = 'unavailable: no snapshots (extension not enabled?)'
         for path in paths:
             data = read_json(path)
-            if data.get('schema') != 'agentic.seat-snapshot/1' or data.get('space') != self.c['space']:
+            if (not isinstance(data, dict) or data.get('schema') != 'agentic.seat-snapshot/1'
+                    or data.get('space') != self.c['space']
+                    or not isinstance(data.get('name'), str) or not data['name']
+                    or not isinstance(data.get('cwd'), str) or not data['cwd']
+                    or not isinstance(data.get('pid'), int) or isinstance(data['pid'], bool)):
                 raise Unavailable()
             name = data['name']
             self.local_names.add(name)
             self.context.setdefault(str(Path(data['cwd']).resolve()), set()).add(name)
             if data.get('piSession'):
                 self.sessions[data['piSession']] = name
-            written = stamp(data['writtenAt'])
+            written = number(stamp(data['writtenAt']))
             age = max(0, now - written)
             live = alive(data['pid'])
+            if (live and age <= self.c['thresholds']['snapshot']
+                    and Path(data['cwd']).resolve().is_relative_to(Path(self.c['workspace_root']).resolve())):
+                self.contact_snapshots.add(name)
             if name in self.live_names and (age > self.c['thresholds']['snapshot'] or not live):
                 self.add('snapshot-stale', name, f'seat process gone or wedged; write age={int(age)}s; process alive={live}; presence still live', self.c['thresholds']['snapshot'])
             # Optional enrichment is liveness-only. A null connection is the
@@ -414,6 +459,7 @@ class Watcher:
         now = self.clock()
         self.findings, self.sources, self.local_names, self.context, self.sessions = [], {}, set(), {}, {}
         self.observations = {}
+        self.contact_snapshots = set()
         self.live_names, self.pending_checked = set(), set()
         self.current_source = 'S1'
         self.sources['S1'] = 'available'
@@ -434,6 +480,8 @@ class Watcher:
             try:
                 read(now)
             except (Unavailable, OSError, KeyError, TypeError, ValueError):
+                if source == 'S3':
+                    self.contact_snapshots.clear()
                 self.unavailable(source)
         return self.findings
 
@@ -471,6 +519,7 @@ class Watcher:
         events = self.reconcile()
         rates = self.c['rate_limits']
         self.state['sent'] = [v for v in self.state['sent'] if now - v < 3600]
+        contact, contact_reason = resolve_contact(self.c, self.seats, self.contact_snapshots)
         candidates = []
         for event in events.values():
             if not event['active']:
@@ -480,7 +529,7 @@ class Watcher:
                 continue
             if finding.get('source') == 'S2' and finding['kind'] != 'source-unavailable' and finding['subject'] not in self.pending_checked:
                 continue
-            human = finding['human'] or len(self.seats) != 1 or finding['subject'] in self.seats
+            human = finding['human'] or contact is None or finding['subject'] in self.seats
             # Once routed to a human, this transition is never subsequently DMed.
             if event['notified']:
                 continue
@@ -499,12 +548,14 @@ class Watcher:
             if route == 'dm' and len(self.state['sent']) >= rates['hourly']:
                 continue
             lines = ['Agentic attention (observe only; no action taken)']
+            if route == 'notification' and contact is None:
+                lines.append('contact: ' + contact_reason)
             for event in selected:
                 f = event['finding']
                 lines.append(f"kind={f['kind']}; subject={f['subject']}; observedAt={f['observedAt']}; facts={f['facts']}; threshold={f['threshold']}; id={event['id']}; suggested owner/action={f['suggested_owner_action']}")
             if route == 'dm' and self.state['resolved']:
                 lines.append('resolved since last: ' + ', '.join(self.state['resolved']))
-            target = self.seats[0] if route == 'dm' else 'human'
+            target = contact if route == 'dm' else 'human'
             deliveries.append({'route': route, 'target': target, 'text': '\n'.join(lines)})
             if not dry_run:
                 for event in selected:
@@ -518,7 +569,12 @@ class Watcher:
         return deliveries
 
     def report(self):
-        return {'observedAt': self.clock(), 'sources': self.sources, 'observations': self.observations, 'liveSeats': self.seats,
+        resolved, reason = resolve_contact(self.c, self.seats, self.contact_snapshots)
+        contact = self.c['contact']
+        return {'contact': {'selector': 'unset' if contact is None else 'name' if 'name' in contact else 'pattern',
+                            'local': bool(contact and contact.get('local', False)),
+                            'resolved': resolved, 'reason': reason},
+                'observedAt': self.clock(), 'sources': self.sources, 'observations': self.observations, 'liveSeats': self.seats,
                 'localSubjects': sorted(self.local_names), 'findings': self.findings,
                 'pending': sum(e['active'] and e['last_dm'] is None and not e['notified'] for e in self.state['events'].values())}
 
