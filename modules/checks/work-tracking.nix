@@ -68,7 +68,7 @@
     assert q.skills == [];
     assert q.index == "user";
     # Always-present worktree and hook commands; no optional tracking/search.
-    assert map (p: p.name) q.packages == ["workbench-worktree-setup" "workbench-worktree-teardown" "workbench-worker-start" "workbench-worktree-remove" "agentic-hooks" "agentic-seat-snapshot" "workbench-worker-recover"];
+    assert map (p: p.name) q.packages == ["workbench-worktree-setup" "workbench-worktree-teardown" "workbench-worker-start" "workbench-worktree-remove" "agentic-hooks" "agentic-seat-snapshot" "workbench-worker-recover" "agentic-attention-watch"];
       pkgs.runCommand "agentic-work-tracking" {
         nativeBuildInputs = [pkgs.git pkgs.gnugrep backlog];
       } ''

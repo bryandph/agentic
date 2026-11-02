@@ -31,6 +31,158 @@ Hard rules:
   core can see (e.g. memories core itself ships) — never a consuming repo's
   artifacts.
 
+## Host attention watcher (opt-in)
+
+`agentic-attention-watch` is a Python daemon, not an agent. It runs on one
+host outside model turns, observes live mesh agents plus host-local processes,
+and escalates to the single live Cotal peer with
+`role=seat`. It never kills, restarts, resends, approves, sends keys, or injects
+prompts. The command is in `devenvLib.packages`, this repository's contributor
+shell, and `packages.<system>.agentic-attention-watch`. Service placement and
+credential provisioning belong to the adopting environment; neither is automatic.
+
+```sh
+agentic-attention-watch run --config /path/to/attention.toml --interval 60
+agentic-attention-watch run --config /path/to/attention.toml --once --dry-run
+agentic-attention-watch status --config /path/to/attention.toml --json
+```
+
+`--once` performs one poll (normal delivery still respects coalescing).
+`--dry-run` prints observations and **would-be** DMs/notifications immediately,
+including findings still inside the coalescing window, but neither sends nor
+updates deduplication/status state. It can create the state directory and lock.
+`status` reads the last persisted observation, including its timestamp and source
+availability; it does not poll or send. All commands accept TOML or `.json` config;
+without `--config` they use defaults. Example (paths are host-local, seconds are
+used throughout):
+
+```toml
+space = "default"
+workspace_root = "~/workspace"  # default: home directory
+state_dir = "~/.local/state/agentic-attention-watch"
+# admin_creds = "~/.local/share/cotal/default/attention-watch/admin.creds"
+# snapshot_dir = "~/.local/state/cotal-seat/default"
+# ci_dir = "~/.local/state/pi-ci-watch"
+# dry_run = true
+# host = "workstation"          # optional advisory presence card.meta.host filter
+pending_per_poll = 16           # rotating per-poll cap; 1..100
+ci_lookback = 86400             # ignore watch states older than 24 hours
+
+[thresholds]
+broker = 900
+rate_limit = 600
+approval = 900
+input = 900
+working = 1800
+herdr = 600
+git = 1200
+snapshot = 180
+
+[rate_limits]
+coalesce = 120
+hourly = 6
+reminder = 7200
+```
+
+State/snapshot/CI defaults honor `XDG_STATE_HOME`. The credential default uses
+`~/.local/share/cotal/<space>/attention-watch/admin.creds`. Override it with
+`AGENTIC_COTAL_ADMIN_CREDS`, config `admin_creds`, or `--admin-creds <path>`
+(in increasing precedence). An absent credential makes S2 **unavailable**, never
+healthy or zero, but is optional and does not notify the human. Before starting
+any subprocess, the watcher checks credential metadata: it refuses a symlink,
+nonregular file, wrong owner, or permission bits other than **exactly 0600**.
+It never opens, logs, prints or copies
+the credential. Provision it separately; never put credentials in Nix/config.
+Only Cotal's admin reader receives its pathname. External stderr and failed-command
+stdout are discarded, not included in logs, status or notifications.
+
+| Source | Observation and default escalation |
+|---|---|
+| S1 Cotal presence | `cotal endpoints --json`, using `facts.condition`, text ages in `facts.ages` and `activityAge`. Rate limit ≥10 min, approval/input ≥15 min, or working with last `active` ≥30 min. `unchanged` alone is not proof of a frozen turn. All live agents are observed without any snapshot dependency. Optional `host` limits work observations to matching `card.meta.host` (or flattened `meta.host`), including untagged agents; seat routing always uses the whole live roster. |
+| S2 broker | `cotal pending <peer> --space <space> --creds <path> --json` for **every** live agent, including coordinators, workers and the operator seat. `pending_per_poll` bounds each poll; a persisted cursor rotates coverage across polls/restarts. The S2 subprocess budget is at most one run interval (each call ≤20 s). Deferred peers are unknown, not resolved; status reports inspected/deferred counts. Nonempty `pending + ackPending` with an unchanged `ackFloor` for ≥15 min. Floor advances or empty backlog reset the persisted clock. Only counts, floor/delivered sequence numbers, and candidate timestamps are projected. Candidate ages are informational: a **bounded sample of recent candidates, not the oldest held**. Cotal 0.91 exposes no redelivery count: it is unavailable, not zero, and there is no active redelivery rule. No message IDs, senders, subjects or bodies are retained. |
+| S3 seat snapshots | Optional `cotal-seat/<space>/*.json`, schema `agentic.seat-snapshot/1`, used for liveness and owner enrichment only. An existing snapshot whose write is stale (>3×60 s) or PID is dead **while its presence remains live** escalates as “seat process gone or wedged”. Missing snapshots produce status `unavailable: no snapshots (extension not enabled?)`, not a finding or notification. `connection: null` plus `connectionError` is normal: no queue-health inference or failure. An existing unreadable/unknown-schema snapshot is unavailable and notifies the human. |
+| S4 Herdr | `herdr agent list` and `herdr pane process-info --pane`, limited to workspace-root descendants. Blocked/waiting/input/approval observed continuously ≥10 min; first-observed clocks persist over restarts. Raw argv, command lines and terminal text are never emitted or retained. Ambiguous owner → human notification. |
+| S5 git | `ps` elapsed time and `lsof` cwd: git/git-remote/git-lfs process ≥20 min with cwd under workspace root (path boundary checked). No process arguments are inspected. Unknown owner or seat-owned git work → human notification. |
+| S6 CI watch | `pi-ci-watch/sessions/*/watches/*/state.json` plus sibling `watch.json`. Pending watches (including actual `phase=running` with `lastObservation.phase=pending`) escalate when `observedAt` exceeds 3× maximum poll cadence, PID is dead, or deadline has passed. Current exponential interval is not persisted, so the maximum is the conservative bound (default 600 s for empty cadence). Only states observed within `ci_lookback` (default 24 h) are considered. Older state is counted as `ignored: N old watch states` in status and never escalated. Terminal/cancelled/error watches are ignored. |
+
+The durable ID is `<kind>:<subject>:<since>`, where `since` is the first observation
+of that firing transition; changing rounded text ages never churns the ID. Delivery
+coalesces findings for two minutes, caps DMs at six per rolling hour, and reminds no
+sooner than every two hours (also coalesced). Config may tighten but not loosen these
+delivery bounds. The next DM lists resolutions since the last DM; resolutions never
+send a standalone message. Unreadable sources do not resolve previously firing work.
+
+A seat's own condition, queue/backlog or snapshot, zero/multiple live seats, and
+configured/expected sources that fail to read use `herdr notification show` instead
+of a DM. Absent optional S2 credentials and S3 snapshots are status-only, never
+notifications. Human notifications
+are at most once per transition ID, with no reminder and no subsequent DM for that
+same ID. Only the single live seat may receive a DM; coordinators/workers never do.
+Every escalation includes kind, subject, observation time, facts/ages, threshold,
+ID and a suggested manual owner/action. A human notification is a routing fallback,
+not evidence of DM delivery or operator acknowledgement.
+
+The state directory stores atomically replaced JSON and an exclusive host lock;
+reuse it across restarts. The public read-only recovery contract is
+`<state_dir>/state.json`, with default path
+`${XDG_STATE_HOME:-$HOME/.local/state}/agentic-attention-watch/state.json`:
+
+```json
+{
+  "schema": "agentic.attention-watch.state/1",
+  "writtenAt": 1793500000.0,
+  "intervalSeconds": 60,
+  "brokerCoverageSeconds": 60,
+  "broker_progress": {
+    "example-worker": {"floor": 42, "since": 1793499100.0, "observedAt": 1793500000.0}
+  }
+}
+```
+
+The file also contains private delivery/deduplication keys; readers must ignore
+them. `writtenAt` is epoch **seconds**, refreshed on every state save;
+`intervalSeconds` is the configured run interval. Unknown schema, missing fields
+or `writtenAt < now - 3 * intervalSeconds` means observation unavailable/stale.
+`broker_progress` is keyed by exact presence name. Each entry contains `floor`
+(the integer `ackFloor` sequence last observed) and `since` (epoch seconds when
+that floor was first seen with a nonempty `pending + ackPending` backlog).
+The floor moving resets `since`; empty backlog removes the entry. A record only
+exists while the last observed backlog is nonempty. Each entry also has
+`observedAt`, the epoch seconds of **that agent's** last successful pending read;
+unpolled/deferred agents retain their previous timestamp. The additive field
+`brokerCoverageSeconds` is the configured coverage bound under rotating polling:
+`intervalSeconds * max(1, ceil(liveObservedAgents / pending_per_poll))`. It is
+recomputed per poll, including optional host filtering. For a usable entry,
+readers require **both** a fresh state file (the 3× interval rule above) and
+`now - entry.observedAt <= 2 * brokerCoverageSeconds`. Missing coverage or entry
+timestamps mean unavailable until the watcher refreshes them. This bound models
+normal configured cadence, not a promise that failed/time-budget-exhausted reads
+completed; the per-agent timestamp guards those delays. Per-poll caps may defer
+a peer; a fresh file is not proof every peer was read in that poll. Readers must
+never treat this read-only diagnostic as authority to act.
+
+State replacement is atomic: write a mode-0600 temporary file, flush/fsync,
+`os.replace`, then fsync the containing directory, so concurrent readers see a
+complete old or new file. The file and floor clock survive watcher restarts.
+Delivery IDs are reserved **before** executing the send.
+Failed/ambiguous sends are not blindly retried; `status` reports delivery failures.
+DM reminders remain bounded; human notification attempts stay at-most-once. Inspect
+failures manually. Run one daemon per host with a unique state directory; nothing
+installs a launch agent. For example, an adopting environment may render launchd
+`ProgramArguments` from the following **comment only**, with explicit package PATH
+for `cotal`, `herdr`, `ps` and `lsof`:
+
+```text
+# Label: example.agentic-attention-watch
+# ProgramArguments: ["/absolute/bin/agentic-attention-watch", "run", "--config", "/absolute/attention.toml"]
+# RunAtLoad: true; KeepAlive: true
+# StandardOutPath/StandardErrorPath: host-private observation logs
+```
+
+The `attention-watch` Nix check uses fake Cotal/Herdr/ps/lsof, fixture files and an
+injected clock; it exercises thresholds, floor progress, delivery timing, restart
+deduplication, routing and sentinel non-disclosure without any live messaging.
+
 ## Secret scanning (opt-in)
 
 Betterleaks is the single scanner for the staged hook, deterministic source-tree
