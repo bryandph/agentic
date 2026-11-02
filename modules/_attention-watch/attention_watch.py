@@ -112,7 +112,7 @@ def config(path=None, server=None):
         'space': 'default', 'workspace_root': str(Path.home()),
         'state_dir': str(xdg / 'agentic-attention-watch'),
         'snapshot_dir': None, 'ci_dir': str(xdg / 'pi-ci-watch'),
-        'admin_creds': None, 'server': None, 'dry_run': False, 'host': None, 'contact': None,
+        'admin_creds': None, 'server': None, 'dry_run': False, 'host': None, 'notify_seat': None,
         'pending_per_poll': 16, 'ci_lookback': 86400,
         'thresholds': {'broker': 900,
                        'rate_limit': 600, 'approval': 900, 'input': 900,
@@ -135,15 +135,15 @@ def config(path=None, server=None):
             else:
                 defaults[key] = val
     c = defaults
-    contact = c['contact']
-    if contact is not None:
-        if (not isinstance(contact, dict) or set(contact) - {'name', 'pattern', 'local'}
-                or len(set(contact) & {'name', 'pattern'}) != 1
-                or not isinstance(contact.get('local', False), bool)):
-            raise ValueError('invalid contact config')
-        selector = 'name' if 'name' in contact else 'pattern'
-        if not isinstance(contact[selector], str) or not contact[selector].strip():
-            raise ValueError('invalid contact config')
+    notify_seat = c['notify_seat']
+    if notify_seat is not None:
+        if (not isinstance(notify_seat, dict) or set(notify_seat) - {'name', 'pattern', 'local'}
+                or len(set(notify_seat) & {'name', 'pattern'}) != 1
+                or not isinstance(notify_seat.get('local', False), bool)):
+            raise ValueError('invalid notify_seat config')
+        selector = 'name' if 'name' in notify_seat else 'pattern'
+        if not isinstance(notify_seat[selector], str) or not notify_seat[selector].strip():
+            raise ValueError('invalid notify_seat config')
     c['server'] = validate_server(server if server is not None else c['server'] if c['server'] is not None else os.environ.get('AGENTIC_COTAL_SERVER'))
     if not isinstance(c['space'], str) or not re.fullmatch(r'[A-Za-z0-9_-]+', c['space']):
         raise ValueError('space must be a simple nonempty name')
@@ -170,21 +170,24 @@ def config(path=None, server=None):
     return c
 
 
-def resolve_contact(c, seats, snapshots):
-    """Select this watcher instance's DM target on this host, using S3 validation.
+def resolve_notify_seat(c, seats, snapshots):
+    """Resolve notification routing for this watcher instance on this host only.
 
-    This is not an exclusive, fenced contact across hosts: two watchers may
-    select different seats. Cross-host selection needs a shared epoch,
-    conditional transfer and fail-closed validation, all out of scope here.
+    This DM destination is not exclusive, not a transfer, and not authority:
+    it conveys no human-contact, ask_user or approval ownership. Each host's
+    watcher can validly route to a different seat. A name/glob match plus a
+    live local snapshot proves only a matching, live, local candidate, not
+    identity/auth proof, revocation of an old session or approval validity.
+    Snapshots are local liveness evidence only.
     """
-    contact = c['contact']
-    if contact is None:
+    notify_seat = c['notify_seat']
+    if notify_seat is None:
         return (seats[0], 'single live seat') if len(seats) == 1 else (
             None, 'no live seat' if not seats else 'multiple live seats')
     matches = [name for name in seats
-               if (name == contact['name'] if 'name' in contact else
-                   fnmatch.fnmatchcase(name, contact['pattern']))
-               and (not contact.get('local', False) or name in snapshots)]
+               if (name == notify_seat['name'] if 'name' in notify_seat else
+                   fnmatch.fnmatchcase(name, notify_seat['pattern']))
+               and (not notify_seat.get('local', False) or name in snapshots)]
     if len(matches) == 1:
         return matches[0], 'selected contact resolved'
     return None, 'selected contact absent' if not matches else 'selected contact ambiguous'
@@ -218,7 +221,7 @@ class Watcher:
         self.sources = {}
         self.seats = []
         self.local_names = set()
-        self.contact_snapshots = set()
+        self.notify_seat_snapshots = set()
         self.context = {}
         self.sessions = {}
         self.current_source = None
@@ -362,7 +365,7 @@ class Watcher:
             live = alive(data['pid'])
             if (live and age <= self.c['thresholds']['snapshot']
                     and Path(data['cwd']).resolve().is_relative_to(Path(self.c['workspace_root']).resolve())):
-                self.contact_snapshots.add(name)
+                self.notify_seat_snapshots.add(name)
             if name in self.live_names and (age > self.c['thresholds']['snapshot'] or not live):
                 self.add('snapshot-stale', name, f'seat process gone or wedged; write age={int(age)}s; process alive={live}; presence still live', self.c['thresholds']['snapshot'])
             # Optional enrichment is liveness-only. A null connection is the
@@ -459,7 +462,7 @@ class Watcher:
         now = self.clock()
         self.findings, self.sources, self.local_names, self.context, self.sessions = [], {}, set(), {}, {}
         self.observations = {}
-        self.contact_snapshots = set()
+        self.notify_seat_snapshots = set()
         self.live_names, self.pending_checked = set(), set()
         self.current_source = 'S1'
         self.sources['S1'] = 'available'
@@ -481,7 +484,7 @@ class Watcher:
                 read(now)
             except (Unavailable, OSError, KeyError, TypeError, ValueError):
                 if source == 'S3':
-                    self.contact_snapshots.clear()
+                    self.notify_seat_snapshots.clear()
                 self.unavailable(source)
         return self.findings
 
@@ -519,7 +522,7 @@ class Watcher:
         events = self.reconcile()
         rates = self.c['rate_limits']
         self.state['sent'] = [v for v in self.state['sent'] if now - v < 3600]
-        contact, contact_reason = resolve_contact(self.c, self.seats, self.contact_snapshots)
+        notify_seat, notify_seat_reason = resolve_notify_seat(self.c, self.seats, self.notify_seat_snapshots)
         candidates = []
         for event in events.values():
             if not event['active']:
@@ -529,7 +532,7 @@ class Watcher:
                 continue
             if finding.get('source') == 'S2' and finding['kind'] != 'source-unavailable' and finding['subject'] not in self.pending_checked:
                 continue
-            human = finding['human'] or contact is None or finding['subject'] in self.seats
+            human = finding['human'] or notify_seat is None or finding['subject'] in self.seats
             # Once routed to a human, this transition is never subsequently DMed.
             if event['notified']:
                 continue
@@ -548,14 +551,14 @@ class Watcher:
             if route == 'dm' and len(self.state['sent']) >= rates['hourly']:
                 continue
             lines = ['Agentic attention (observe only; no action taken)']
-            if route == 'notification' and contact is None:
-                lines.append('contact: ' + contact_reason)
+            if route == 'notification' and notify_seat is None:
+                lines.append('notify_seat: ' + notify_seat_reason)
             for event in selected:
                 f = event['finding']
                 lines.append(f"kind={f['kind']}; subject={f['subject']}; observedAt={f['observedAt']}; facts={f['facts']}; threshold={f['threshold']}; id={event['id']}; suggested owner/action={f['suggested_owner_action']}")
             if route == 'dm' and self.state['resolved']:
                 lines.append('resolved since last: ' + ', '.join(self.state['resolved']))
-            target = contact if route == 'dm' else 'human'
+            target = notify_seat if route == 'dm' else 'human'
             deliveries.append({'route': route, 'target': target, 'text': '\n'.join(lines)})
             if not dry_run:
                 for event in selected:
@@ -569,10 +572,10 @@ class Watcher:
         return deliveries
 
     def report(self):
-        resolved, reason = resolve_contact(self.c, self.seats, self.contact_snapshots)
-        contact = self.c['contact']
-        return {'contact': {'selector': 'unset' if contact is None else 'name' if 'name' in contact else 'pattern',
-                            'local': bool(contact and contact.get('local', False)),
+        resolved, reason = resolve_notify_seat(self.c, self.seats, self.notify_seat_snapshots)
+        notify_seat = self.c['notify_seat']
+        return {'notifySeat': {'selector': 'unset' if notify_seat is None else 'name' if 'name' in notify_seat else 'pattern',
+                            'local': bool(notify_seat and notify_seat.get('local', False)),
                             'resolved': resolved, 'reason': reason},
                 'observedAt': self.clock(), 'sources': self.sources, 'observations': self.observations, 'liveSeats': self.seats,
                 'localSubjects': sorted(self.local_names), 'findings': self.findings,

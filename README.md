@@ -70,7 +70,7 @@ pending_per_poll = 16           # rotating per-poll cap; 1..100
 ci_lookback = 86400             # ignore watch states older than 24 hours
 
 # Optional: select this watcher instance's DM target on this host.
-[contact]
+[notify_seat]
 pattern = "coord-BPH-*"         # or name = "exact-presence-name", never both
 local = true                   # needs the seat-snapshot extension on the seat
 
@@ -124,8 +124,10 @@ sooner than every two hours (also coalesced). Config may tighten but not loosen 
 delivery bounds. The next DM lists resolutions since the last DM; resolutions never
 send a standalone message. Unreadable sources do not resolve previously firing work.
 
-The optional `contact` table selects the DM target for **this watcher instance on
-this host only**. Set exactly one nonempty string: `name` matches an exact live
+The optional `notify_seat` table sets notification routing for **this watcher
+instance on this host only**. It is the watcher's DM destination only, not
+human-contact ownership, `ask_user` ownership or approval authority; it is not
+exclusive, not a transfer, and not authority. Set exactly one nonempty string: `name` matches an exact live
 role=`seat` presence name, or `pattern` matches those names using a case-sensitive
 fnmatch glob. Optional boolean `local = true` additionally requires a fresh, valid
 `agentic.seat-snapshot/1` file in `snapshot_dir`, for that name and space, with a
@@ -137,14 +139,25 @@ exactly one live seat → DM; zero/multiple live seats → notification. With a 
 exactly one qualifying seat → DM only to it; zero → notification with reason
 `selected contact absent`; multiple → notification with reason
 `selected contact ambiguous`. There is no guess or fallback to another seat.
-`status.json` includes `contact: {selector, local, resolved, reason}`, with selector
+`status.json` includes `notifySeat: {selector, local, resolved, reason}`, with selector
 `unset`, `name` or `pattern` and a resolved presence name or null. Changing the
 resolved name does not create a new transition or reset delivery deduplication.
 
-This does **not** establish an exclusive, fenced contact across hosts. Two watchers
-on two hosts can each select their own seat. Cross-host contact selection would
-need a shared epoch, conditional transfer and fail-closed validation; that is out
-of scope.
+A fnmatch match plus a local snapshot with a live PID proves only **a matching,
+live, local candidate**. The snapshot is local liveness evidence only, not a global
+selection, identity/auth proof, revocation of an old session or approval validity.
+The watcher's presence projection does not carry host information reliably:
+Cotal 0.91 `AgentCard.meta.host` is optional and advisory (the existing `host`
+filter reads it); BPH-92 does not use it as proof. Each host's watcher can validly
+route to a different seat. There is no automatic takeover: if a configured seat
+is absent while another seat is live, the watcher notifies rather than DMs the
+other seat.
+
+**Future (not implemented):** a global contact mode would be a **distinct typed
+selector/adapter** resolving shared authority with incarnation + epoch, conditional
+transfer and fail-closed validation. It must not reinterpret `pattern` as
+authority. Once a global contact is explicitly configured, the unset legacy
+single-seat fallback must not bypass it. This is outside BPH-92's scope.
 
 Any seat's own condition, queue/backlog or snapshot (even the selected seat), an
 unresolved selection, and configured/expected sources that fail to read use
