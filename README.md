@@ -132,8 +132,9 @@ reuse it across restarts. The public read-only recovery contract is
   "schema": "agentic.attention-watch.state/1",
   "writtenAt": 1793500000.0,
   "intervalSeconds": 60,
+  "brokerCoverageSeconds": 60,
   "broker_progress": {
-    "example-worker": {"floor": 42, "since": 1793499100.0}
+    "example-worker": {"floor": 42, "since": 1793499100.0, "observedAt": 1793500000.0}
   }
 }
 ```
@@ -146,8 +147,18 @@ or `writtenAt < now - 3 * intervalSeconds` means observation unavailable/stale.
 (the integer `ackFloor` sequence last observed) and `since` (epoch seconds when
 that floor was first seen with a nonempty `pending + ackPending` backlog).
 The floor moving resets `since`; empty backlog removes the entry. A record only
-exists while the last observed backlog is nonempty. Per-poll caps may defer a
-peer; a fresh file is not proof every peer was read in that poll. Readers must
+exists while the last observed backlog is nonempty. Each entry also has
+`observedAt`, the epoch seconds of **that agent's** last successful pending read;
+unpolled/deferred agents retain their previous timestamp. The additive field
+`brokerCoverageSeconds` is the configured coverage bound under rotating polling:
+`intervalSeconds * max(1, ceil(liveObservedAgents / pending_per_poll))`. It is
+recomputed per poll, including optional host filtering. For a usable entry,
+readers require **both** a fresh state file (the 3× interval rule above) and
+`now - entry.observedAt <= 2 * brokerCoverageSeconds`. Missing coverage or entry
+timestamps mean unavailable until the watcher refreshes them. This bound models
+normal configured cadence, not a promise that failed/time-budget-exhausted reads
+completed; the per-agent timestamp guards those delays. Per-poll caps may defer
+a peer; a fresh file is not proof every peer was read in that poll. Readers must
 never treat this read-only diagnostic as authority to act.
 
 State replacement is atomic: write a mode-0600 temporary file, flush/fsync,

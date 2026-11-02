@@ -162,6 +162,7 @@ class Watcher:
         self.state = state if state is not None else {'events': {}, 'sent': [], 'resolved': [], 'seen': {}}
         self.state.update(schema='agentic.attention-watch.state/1', intervalSeconds=interval)
         self.state.setdefault('broker_progress', {})
+        self.state.setdefault('brokerCoverageSeconds', interval)
         self.interval = interval
         self.clock = clock
         self.live_names = set()
@@ -222,6 +223,7 @@ class Watcher:
         return items
 
     def pending(self, items, now):
+        self.state['brokerCoverageSeconds'] = self.interval * max(1, math.ceil(len(items) / self.c['pending_per_poll']))
         if not credential_available(self.c):
             self.sources['S2'] = 'unavailable: admin credential absent (optional)'
             return
@@ -241,6 +243,7 @@ class Watcher:
             data = command(['cotal', 'pending', name, '--space', self.c['space'],
                             '--creds', self.c['admin_creds'], '--json'],
                            allow_partial=True, timeout=min(20, remaining))
+            now = self.clock()  # Timestamp this agent's completed read, not the poll start.
             self.observations['S2']['inspectedPeers'] += 1
             self.observations['S2']['deferredPeers'] -= 1
             # Strict projection: no IDs, sender, subjects, bodies, durable names,
@@ -259,10 +262,11 @@ class Watcher:
                 progress.pop(name, None)
                 since = now
             elif previous is None or previous['floor'] != floor:
-                progress[name] = {'floor': floor, 'since': now}
+                progress[name] = {'floor': floor, 'since': now, 'observedAt': now}
                 since = now
             else:
                 since = previous['since']
+                previous['observedAt'] = now
             candidate_ages = [max(0, now - stamp(row['ts'])) for row in data.get('candidates', [])
                               if isinstance(row, dict) and 'ts' in row]
             candidate_age = max(candidate_ages, default=0)

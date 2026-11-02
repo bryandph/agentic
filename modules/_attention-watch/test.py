@@ -407,12 +407,17 @@ class Sandbox(unittest.TestCase):
         self.c['pending_per_poll'] = 1
         self.observe()
         self.assertEqual(set(self.w.state['broker_progress']), {'operator'})
+        self.assertEqual(self.w.state['brokerCoverageSeconds'], 120)
+        self.assertEqual(self.w.state['broker_progress']['operator']['observedAt'], self.now)
         self.assertEqual(self.w.observations['S2']['deferredPeers'], 1)
         self.restart()
         self.observe()
         self.assertEqual(set(self.w.state['broker_progress']), {'operator', 'worker'})
         self.now += 900
         self.observe()  # operator is checked; worker is deferred, not resolved
+        self.assertEqual(self.w.state['broker_progress']['operator']['observedAt'], self.now)
+        self.assertEqual(self.w.state['broker_progress']['worker']['observedAt'], self.now - 900)
+        self.assertGreater(self.now - self.w.state['broker_progress']['worker']['observedAt'], 2 * self.w.state['brokerCoverageSeconds'])
         self.w.deliver()
         self.observe()  # worker checked; operator deferred
         self.w.deliver()
@@ -446,10 +451,12 @@ class Sandbox(unittest.TestCase):
         self.assertEqual(data['writtenAt'], self.now)
         self.assertIsInstance(data['writtenAt'], float)
         self.assertEqual(data['intervalSeconds'], 60)
-        self.assertEqual(data['broker_progress'], {'operator': {'floor': 1, 'since': self.now}, 'worker': {'floor': 1, 'since': self.now}})
+        self.assertEqual(data['brokerCoverageSeconds'], 60)
+        self.assertEqual(data['broker_progress'], {'operator': {'floor': 1, 'since': self.now, 'observedAt': self.now}, 'worker': {'floor': 1, 'since': self.now, 'observedAt': self.now}})
         self.assertEqual(state_path.stat().st_mode & 0o777, 0o600)
         self.now += 181
         self.assertLess(data['writtenAt'], self.now - 3 * data['intervalSeconds'])
+        self.assertGreater(self.now - data['broker_progress']['worker']['observedAt'], 2 * data['brokerCoverageSeconds'])
         self.fixture['cotal:pending']['pending'] = 0
         self.observe()
         self.restart()
