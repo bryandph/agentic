@@ -31,6 +31,109 @@ Hard rules:
   core can see (e.g. memories core itself ships) — never a consuming repo's
   artifacts.
 
+## Host attention watcher (opt-in)
+
+`agentic-attention-watch` is a Python daemon, not an agent. It observes one
+host outside model turns and escalates to the single live Cotal peer with
+`role=seat`. It never kills, restarts, resends, approves, sends keys, or injects
+prompts. The command is in `devenvLib.packages`, this repository's contributor
+shell, and `packages.<system>.agentic-attention-watch`. Service placement and
+credential provisioning belong to the adopting environment; neither is automatic.
+
+```sh
+agentic-attention-watch run --config /path/to/attention.toml --interval 60
+agentic-attention-watch run --config /path/to/attention.toml --once --dry-run
+agentic-attention-watch status --config /path/to/attention.toml --json
+```
+
+`--once` performs one poll (normal delivery still respects coalescing).
+`--dry-run` prints observations and **would-be** DMs/notifications immediately,
+including findings still inside the coalescing window, but neither sends nor
+updates deduplication/status state. It can create the state directory and lock.
+`status` reads the last persisted observation, including its timestamp and source
+availability; it does not poll or send. All commands accept TOML or `.json` config;
+without `--config` they use defaults. Example (paths are host-local, seconds are
+used throughout):
+
+```toml
+space = "default"
+workspace_root = "~/workspace"  # default: home directory
+state_dir = "~/.local/state/agentic-attention-watch"
+# admin_creds = "~/.local/share/cotal/default/attention-watch/admin.creds"
+# snapshot_dir = "~/.local/state/cotal-seat/default"
+# ci_dir = "~/.local/state/pi-ci-watch"
+# dry_run = true
+
+[thresholds]
+queue = 900
+broker = 900
+rate_limit = 600
+approval = 900
+input = 900
+working = 1800
+herdr = 600
+git = 1200
+snapshot = 180
+
+[rate_limits]
+coalesce = 120
+hourly = 6
+reminder = 7200
+```
+
+State/snapshot/CI defaults honor `XDG_STATE_HOME`. The credential default uses
+`~/.local/share/cotal/<space>/attention-watch/admin.creds`. An absent credential
+makes S2 **unavailable**, never healthy or zero. Before starting any subprocess,
+the watcher checks credential metadata: it refuses a symlink, nonregular file,
+wrong owner, or permissions looser than 0600. It never opens, logs, prints or copies
+the credential. Provision it separately; never put credentials in Nix/config.
+Only Cotal's admin reader receives its pathname. External stderr and failed-command
+stdout are discarded, not included in logs, status or notifications.
+
+| Source | Observation and default escalation |
+|---|---|
+| S1 Cotal presence | `cotal endpoints --json`, using `facts.condition`, text ages in `facts.ages` and `activityAge`. Rate limit ≥10 min, approval/input ≥15 min, or working with last `active` ≥30 min. `unchanged` alone is not proof of a frozen turn. Only S3-bound local peers are observed; seat routing uses the whole live roster. |
+| S2 broker | `cotal pending <peer> --json --creds <path>` for local live peers. Nonempty `pending + ackPending` with an unchanged `ackFloor` for ≥15 min. Floor advances or empty backlog reset the persisted clock. Only counts, floor/delivered sequence numbers, and candidate timestamps are projected. Candidate ages are informational: a **bounded sample of recent candidates, not the oldest held**. Cotal 0.91 exposes no redelivery count: it is unavailable, not zero, and there is no active redelivery rule. No message IDs, senders, subjects or bodies are retained. |
+| S3 seat snapshots | `cotal-seat/<space>/*.json`, schema `agentic.seat-snapshot/1`: queue head without progress ≥15 min; stale write (>3×60 s) or dead writer process. Unknown schema/missing directory/connection is unavailable, never healthy. Snapshots bind local presence names and working directories. |
+| S4 Herdr | `herdr agent list` and `herdr pane process-info --pane`, limited to workspace-root descendants. Blocked/waiting/input/approval observed continuously ≥10 min; first-observed clocks persist over restarts. Raw argv, command lines and terminal text are never emitted or retained. Ambiguous owner → human notification. |
+| S5 git | `ps` elapsed time and `lsof` cwd: git/git-remote/git-lfs process ≥20 min with cwd under workspace root (path boundary checked). No process arguments are inspected. Unknown owner or seat-owned git work → human notification. |
+| S6 CI watch | `pi-ci-watch/sessions/*/watches/*/state.json` plus sibling `watch.json`. Pending watches (including actual `phase=running` with `lastObservation.phase=pending`) escalate when `observedAt` exceeds 3× maximum poll cadence, PID is dead, or deadline has passed. Current exponential interval is not persisted, so the maximum is the conservative bound. Terminal/cancelled/error watches are ignored. |
+
+The durable ID is `<kind>:<subject>:<since>`, where `since` is the first observation
+of that firing transition; changing rounded text ages never churns the ID. Delivery
+coalesces findings for two minutes, caps DMs at six per rolling hour, and reminds no
+sooner than every two hours (also coalesced). Config may tighten but not loosen these
+delivery bounds. The next DM lists resolutions since the last DM; resolutions never
+send a standalone message. Unreadable sources do not resolve previously firing work.
+
+A seat's own condition, queue/backlog or snapshot, zero/multiple live seats, and
+unreadable sources use `herdr notification show` instead of a DM. Human notifications
+are at most once per transition ID, with no reminder and no subsequent DM for that
+same ID. Only the single live seat may receive a DM; coordinators/workers never do.
+Every escalation includes kind, subject, observation time, facts/ages, threshold,
+ID and a suggested manual owner/action. A human notification is a routing fallback,
+not evidence of DM delivery or operator acknowledgement.
+
+The state directory stores atomically replaced JSON and an exclusive host lock;
+reuse it across restarts. Delivery IDs are reserved **before** executing the send.
+Failed/ambiguous sends are not blindly retried; `status` reports delivery failures.
+DM reminders remain bounded; human notification attempts stay at-most-once. Inspect
+failures manually. Run one daemon per host with a unique state directory; nothing
+installs a launch agent. For example, an adopting environment may render launchd
+`ProgramArguments` from the following **comment only**, with explicit package PATH
+for `cotal`, `herdr`, `ps` and `lsof`:
+
+```text
+# Label: example.agentic-attention-watch
+# ProgramArguments: ["/absolute/bin/agentic-attention-watch", "run", "--config", "/absolute/attention.toml"]
+# RunAtLoad: true; KeepAlive: true
+# StandardOutPath/StandardErrorPath: host-private observation logs
+```
+
+The `attention-watch` Nix check uses fake Cotal/Herdr/ps/lsof, fixture files and an
+injected clock; it exercises thresholds, floor progress, delivery timing, restart
+deduplication, routing and sentinel non-disclosure without any live messaging.
+
 ## Secret scanning (opt-in)
 
 Betterleaks is the single scanner for the staged hook, deterministic source-tree
