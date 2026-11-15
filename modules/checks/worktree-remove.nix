@@ -40,6 +40,7 @@
         run = "echo verified: resources absent";
       }
     ];
+    noHooks = fixture [];
     bad = fixture ["echo cleanup failed; exit 1"];
     skipped = fixture ["echo verified: resources absent; echo skipped: unavailable"];
   in {
@@ -50,7 +51,8 @@
         python3 ${./_worktree-remove.py} \
           ${good.removeScript pkgs}/bin/workbench-worktree-remove \
           ${bad.removeScript pkgs}/bin/workbench-worktree-remove \
-          ${skipped.removeScript pkgs}/bin/workbench-worktree-remove > "$out"
+          ${skipped.removeScript pkgs}/bin/workbench-worktree-remove \
+          ${noHooks.removeScript pkgs}/bin/workbench-worktree-remove > "$out"
       '';
   };
 }
