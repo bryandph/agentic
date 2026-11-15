@@ -101,13 +101,14 @@ Names are unique `[A-Za-z0-9_-]` tokens within each list. Named setup steps use
 `setupHooks[<name>]`, while strings keep `setupHooks[<index>]`. Non-required
 setup hook failures degrade the record and allow later hooks to run. Hook
 `needs` must reference keys in `workbench.worktree.services` (default `{}`);
-unknown names fail evaluation. Named setup steps record their `needs`. Service
-declarations are placeholders for step 5; no services are started or checked. The environment blocker
+unknown names fail evaluation. Named setup steps record their `needs`. Shared
+services are probed/attached or started before their first dependent hook (see
+below). The environment blocker
 `nix-relativeworktrees` instead stops discovery, the devShell probe, or warm-up
 regardless of `shell.required`, recording `blocker` with the Nix version,
 bounded stderr and remediation. Convert repository worktrees to absolute links
 and unset `extensions.relativeWorktrees` (operator cleanup), or use Nix >=
-2.34.9. Service blockers come in a later step. `agentic-worktree-setup` remains an
+2.34.9. `agentic-worktree-setup` remains an
 alias for the canonical creator-neutral command.
 
 Each required `workbench.worktree.teardownHooks` command (including plain
@@ -116,7 +117,8 @@ printing `skipped` (case-insensitive). A required failure stops cleanup and
 vetoes removal. Non-required hooks need no verification line and may print
 `skipped`; nonzero exits are reported but neither stop later hooks nor veto
 removal. Mark cleanup non-required only when leaving it unverified is safe.
-Teardown `needs` is validated but not acted on. No hooks succeeds with a note. Only the
+Teardown `needs` supplies service connection env without starting services.
+Successful teardown detaches repository leases, even with no hooks. Only the
 coordinator removes a reviewed, safe worktree after verified cleanup; the
 runner never removes it or uses force. Stock Git refuses removal of a
 worktree with initialized submodules even after deinit; after verified teardown
@@ -126,6 +128,43 @@ dirty or ambiguously owned trees. A `submodule-stub` setup failure instead
 requires the manual, data-preserving backup repair described in the README;
 setup does not auto-repair or delete submodule state. See the
 [setup options, result schema and exit codes](../README.md#worktree-setup-and-verified-teardown).
+
+## Shared worktree services
+
+Declare `workbench.worktree.services.<name>` in Nix with `probe` (exactly one of
+`{ tcp = "host:port"; }` or `{ run = "command"; }`), `process` (defaults to the
+service name), `start` (optional command override), `autostart` (default true),
+`startTimeout` (default 60 seconds), and `env` (default `{}`). Env contains only
+non-secret connection values: it is stored in Nix and setup records, so never
+put credentials there. Hooks receive env only for services in their `needs`;
+workers can read `services.<name>.env` from the setup record.
+
+Services are repository-shared, never worktree-specific. Setup probes first and
+attaches if up. No lease means external ownership, which cannot be stopped. If
+down, autostart uses a `services:<name>` tab in the existing main-checkout Herdr
+workspace, running `start` or `devenv up <process>` from the main checkout. A
+missing workspace blocks with `service-workspace-missing`; a failed probe with
+attach-only or after the timeout blocks with `service-unavailable`. Blockers
+include kind `environment`, service and remediation; unavailable also records
+probe, startAttempted and detail. Status is `blocked` and exit 6; do not launch a
+worker or accept a blocked setup. Failed-start tabs and leases remain inspectable.
+
+Leases in `$XDG_STATE_HOME/workbench/services/<main-path-hash>/<service>.json`
+record the owner (`COTAL_NAME`, otherwise `user:<login>`), start metadata and
+attached worktrees. Attaches update the list; successful teardown/remove only
+detach. Nothing is stopped automatically. A down service with an existing lease
+blocks without replacing its ownership; inspect and explicitly stop before retry.
+
+Use `workbench-services [--worktree <path>] status [<name>]` for leases and live
+probes, plus `paneExists` (true/false, or null if Herdr is unavailable). An
+existing-lease blocker names the lease, owner and tab/pane with exact recovery
+commands. `workbench-services [--worktree <path>] stop <name>` closes its recorded
+Herdr tab and deletes its lease only when no worktrees remain attached and the
+caller owns it (or explicitly supplies `--as-owner <recorded-owner>`). External
+services and attached leases are refused. A missing recorded tab removes only
+the stale lease with a note; other Herdr errors keep the lease and refuse stop.
+After worktree removal, use the main
+checkout for status/stop. See the [shared services model](../README.md#shared-services).
 
 ## Legacy adapter compatibility
 

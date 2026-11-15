@@ -78,7 +78,7 @@
     namedDegraded =
       (fixture {
         agentic.worktree.shell.kind = "none";
-        agentic.worktree.services.database = {};
+        agentic.worktree.services.database.probe.run = "true";
         agentic.worktree.setupHooks = [
           {
             name = "optional-check";

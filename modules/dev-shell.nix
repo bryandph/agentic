@@ -39,6 +39,7 @@ in {
         (own.lib.worktree.teardownScript pkgs)
         (own.lib.worktree.workerStartScript pkgs)
         (own.lib.worktree.removeScript pkgs)
+        (own.lib.worktree.servicesScript pkgs)
         (import ./registry/_seat-tools/package.nix pkgs "agentic-seat-snapshot")
         (own.lib.worktree.workerRecoverScript pkgs)
       ];
