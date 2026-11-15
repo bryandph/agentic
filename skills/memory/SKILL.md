@@ -10,7 +10,7 @@ bundle in the folder set by `agentic.bundle.root` (usually `.okf/`),
 committed with the code. It holds durable knowledge about the
 repository: decisions (`type: Decision`), how it works, why it is that
 way, gotchas, conventions, references and playbooks. Work and its status
-belong in the backlog (see the work-tracking skill), never in the bundle.
+belong in the repository's work tracker, never in the bundle.
 
 ## Search before you design
 
