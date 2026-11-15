@@ -119,7 +119,7 @@
         # Legacy shared-state links are replaced on re-run.
         grep -qF '"$(readlink "$d")" = "$main_wt/$d"' "$setup"
         # Dev shell warmed once, outside any agent sandbox.
-        grep -qF 'nix develop --impure -c true' "$setup"
+        grep -qF 'nix develop ".#$shell_attr" --impure -c true' "$setup"
         grep -qF 'devenv shell -- true' "$setup"
         # Degrade probe precedes artifact placement and names the
         # constraint + workaround.

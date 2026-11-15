@@ -35,6 +35,26 @@
       };
     };
     good = (fixture base).lib.fixture;
+    flakeShell =
+      (fixture {
+        imports = [base];
+        agentic.worktree.shell.kind = "flake";
+      }).lib.fixture;
+    requiredShell =
+      (fixture {
+        imports = [base];
+        agentic.worktree.shell = {
+          kind = "flake";
+          required = true;
+        };
+      }).lib.fixture;
+    absentShell =
+      (fixture {
+        agentic.worktree.shell = {
+          kind = "flake";
+          attr = "absent";
+        };
+      }).lib.fixture;
     changed =
       (fixture {
         imports = [base];
@@ -179,6 +199,8 @@
           fi
         }
         expect_check 2 "$TMPDIR/one"
+        expect_code 2 ${setup} --check --json "$TMPDIR/one"
+        jq -e '. == {status: "missing", code: 2, digest: null, record: null}' "$TMPDIR/stdout"
         # Worker-start must use this consumer's setup, even in a shell with
         # no sibling executable on PATH and an inherited foreign override.
         ! command -v workbench-worktree-setup
@@ -194,6 +216,8 @@
           test "$(wc -l < "$TMPDIR/stderr" | tr -d ' ')" = 1
           grep -F 'worktree setup does not apply' "$TMPDIR/stderr"
           ! grep -F 'run workbench-worktree-setup' "$TMPDIR/stderr"
+          expect_code 4 ${setup} --check --json "$na"
+          jq -e '. == {status: "not-applicable", code: 4, digest: null, record: null}' "$TMPDIR/stdout"
         done
         # LAB-178 reproduction: a recursive reset before init creates a
         # config-only gitdir. Setup must preserve it and fail closed, not repair.
@@ -298,16 +322,70 @@
         jq -e '.status == "failed" and .failedStep == "setupHooks[0]"' "$(record one)"
         expect_code 1 ${failing.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --check "$TMPDIR/one"
         ${setup} --worktree "$TMPDIR/one"
-        # Broken metadata and explicit warm-up failure both persist failed results.
+        # v1 is stale even when it names the current setup command.
+        jq 'del(.schema)' "$(record two)" > legacy
+        cp legacy "$(record two)"
+        expect_check 3 "$TMPDIR/two"
+        expect_code 3 ${setup} --check --json "$TMPDIR/two"
+        jq -e '.status == "stale" and .code == 3 and (.record | has("schema") | not)' "$TMPDIR/stdout"
+        printf 'malformed {' > "$(record two)"
+        expect_code 1 ${setup} --check --json "$TMPDIR/two"
+        jq -e '.status == "failed" and .code == 1 and .record == null and (.digest | length == 64)' "$TMPDIR/stdout"
+        # Auto none: shell steps do not apply, but ordinary setup still runs.
         cp two/flake.nix good-flake
-        echo 'invalid nix !' > two/flake.nix
-        expect_code 1 ${setup} --worktree "$TMPDIR/two"
-        expect_check 1 "$TMPDIR/two"
-        jq -e '.status == "failed" and .failedStep == "discovery" and .warmUp.status == "not-run"' "$(record two)"
-        echo '{ outputs = _: {}; }' > two/flake.nix
-        expect_code 1 ${setup} --worktree "$TMPDIR/two"
-        jq -e '.status == "failed" and .failedStep == "warm-up" and .warmUp.status == "failed" and .warmUp.exitCode != 0' "$(record two)"
+        rm two/flake.nix
+        rm -f two/devenv.nix
+        ${setup} --worktree "$TMPDIR/two"
+        jq -e '.schema == "workbench.worktree-setup/2" and .status == "ok" and ([.steps[] | select(.name == "discovery" or .name == "warm-up") | .outcome] == ["not-applicable", "not-applicable"])' "$(record two)"
         cp good-flake two/flake.nix
+        ${absentShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        jq -e '.status == "ok" and (.steps[] | select(.name == "warm-up") | .applies == false and (.reason | contains("absent")))' "$(record two)"
+        # Missing devShells entirely is also not-applicable.
+        echo '{ outputs = _: {}; }' > two/flake.nix
+        ${flakeShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        jq -e '.status == "ok" and (.steps[] | select(.name == "warm-up") | .outcome == "not-applicable")' "$(record two)"
+        # Successful metadata discovery does not imply shell-name eval works.
+        # Probe errors must retain stderr, never masquerade as absent shells.
+        echo '{ outputs = _: throw "fixture probe eval failure"; }' > two/flake.nix
+        rm two/setup-order
+        ${flakeShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two" > "$TMPDIR/stdout" 2> "$TMPDIR/stderr"
+        grep -F 'fixture probe eval failure' "$TMPDIR/stderr"
+        jq -e '.status == "degraded" and (.steps[] | select(.name == "discovery") | .outcome == "ok") and (.steps[] | select(.name == "warm-up") | .applies == true and .outcome == "failed" and (.message | contains("fixture probe eval failure")))' "$(record two)"
+        test "$(cat two/setup-order)" = "$(printf 'first\nsecond')"
+        rm two/setup-order
+        expect_code 1 ${requiredShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        test ! -e two/setup-order
+        jq -e '.status == "failed" and .failedStep == "warm-up" and (.steps[-1] | .applies == true and .required == true and .outcome == "failed" and (.message | contains("fixture probe eval failure")))' "$(record two)"
+        # Broken discovery degrades by default and still runs ordered hooks.
+        echo 'invalid nix !' > two/flake.nix
+        rm -f two/setup-order
+        ${flakeShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        expect_code 5 ${flakeShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --check --json "$TMPDIR/two"
+        jq -e '.status == "degraded" and .code == 5 and (.digest | length == 64) and (.record.steps[] | select(.name == "discovery") | .message | contains("nix flake discovery failed"))' "$TMPDIR/stdout"
+        test "$(cat two/setup-order)" = "$(printf 'first\nsecond')"
+        rm two/setup-order
+        expect_code 1 ${requiredShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        test ! -e two/setup-order
+        jq -e '.status == "failed" and .failedStep == "discovery" and .warmUp.status == "not-run" and (.steps[-1] | .name == "discovery" and .required == true and .outcome == "failed" and (.message | contains("nix flake discovery failed")))' "$(record two)"
+        echo '{ outputs = _: { devShells.${system}.default = throw "fixture warm-up failure"; }; }' > two/flake.nix
+        ${flakeShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        jq -e '.status == "degraded" and (.steps[] | select(.name == "warm-up") | .outcome == "failed" and .required == false)' "$(record two)"
+        test "$(cat two/setup-order)" = "$(printf 'first\nsecond')"
+        cp "$(record two)" "$TMPDIR/degraded-sample.json"
+        cat "$TMPDIR/degraded-sample.json"
+        expect_code 5 ${flakeShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --check --json "$TMPDIR/two"
+        test "$(jq -r .digest "$TMPDIR/stdout")" = "$(sha256sum "$(record two)" | cut -d ' ' -f 1)"
+        # A required hook failure wins over an earlier non-required failure.
+        expect_code 9 ${failing.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        jq -e '.status == "failed" and .failedStep == "setupHooks[0]" and (.steps[-1] | .name == "setupHooks[0]" and .required == true and .exitCode == 9)' "$(record two)"
+        rm two/setup-order
+        expect_code 1 ${requiredShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        test ! -e two/setup-order
+        jq -e '.status == "failed" and .failedStep == "warm-up" and .warmUp.status == "failed" and .warmUp.exitCode != 0 and (.steps[-1] | .name == "warm-up" and .required == true and .outcome == "failed")' "$(record two)"
+        expect_code 1 ${requiredShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --check --json "$TMPDIR/two"
+        jq -e '.status == "failed" and .code == 1 and .record.status == "failed"' "$TMPDIR/stdout"
+        cp good-flake two/flake.nix
+        ${lib.optionalString pkgs.stdenv.isDarwin "touch two/devenv.nix"}
         ${setup} --worktree "$TMPDIR/two"
         # Only disposable fixture files are removed here, never user resources.
         # Git refuses even a clean, deinitialized submodule worktree. Assert that
@@ -323,7 +401,8 @@
         test "$(git -C two hook run pre-commit 2>&1)" = two-hook
         test "$(git -C main rev-parse --show-toplevel)" = "$TMPDIR/main"
         expect_check 0 "$TMPDIR/two"
-        touch "$out"
+        mkdir "$out"
+        cp "$TMPDIR/degraded-sample.json" "$out/degraded-sample.json"
       '';
   };
 }

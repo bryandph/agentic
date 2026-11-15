@@ -689,7 +689,7 @@ use the same bounds and carry setup errors or Herdr lifecycle facts separately
 (state, fallback reason, visible-state flags, manifest version and matched rule),
 without detector buffer previews. The pane also prints the human-readable,
 shell-quoted launcher command before starting it. Exit codes are 0 `started`, 10
-`blocked`, 11 `not-started`, 20 `launch-failed`, 30 `setup-failed`; argument errors are CLI
+`blocked`, 11 `not-started`, 20 `launch-failed`, 30 `setup-failed`, 31 `setup-degraded`; argument errors are CLI
 misuse. Timeout is in seconds; unclassified startup or an undetected agent
 fails closed. A detected agent that never reaches working/blocked returns
 `not-started`, preserving its state and Herdr explanation fields. A returned
@@ -700,6 +700,16 @@ retries a launch or cleans up resources. Inspect failures and escalate prompts.
 **Started is not accepted**: acceptance remains the worker's first acknowledging
 message to the coordinator. Keep that acceptance step separate.
 
+A degraded setup check (5) refuses worker start with `setup-degraded` (31).
+After reviewing the record, a coordinator may pass
+`--accept-setup <digest> --reason <non-empty text>` before the launcher `--`.
+Only a digest matching the current record allows launch; mismatch refuses with
+the current and accepted digests. The launch JSON includes
+`setupOverride: {digest, reason, status: "degraded"}`. An ok record launches
+normally and marks a supplied override `status: "unused"`. Checks 1/2/3/4
+remain `setup-failed` (30) regardless of any override; failed setup is never
+overridable.
+
 Known limitation (live-qualified with Herdr 0.9.5, Pi manifest 2026.10.01.1):
 Pi's project-trust UI is detected as `idle`, with
 `fallback_reason=default_known_agent_idle_fallback` and `visible_blocker=false`,
@@ -708,9 +718,9 @@ escalate this prompt; no trust response is automated.
 
 Setup and standalone teardown default to the current directory. Setup preserves per-worktree
 copies, isolated writable `.direnv`/`.devenv` state, and Git hooks. Declared
-submodules initialize recursively, before shell warm-up. Warm-up failure is a
-setup failure, not success with a warning. Rerunning setup is idempotent for
-unchanged repository inputs; repository hooks must also be safe to repeat.
+submodules initialize recursively, before shell warm-up. Non-required shell
+failures produce a degraded record, not an ok record; required failures stop
+setup. Rerunning setup is idempotent for unchanged repository inputs; repository hooks must also be safe to repeat.
 
 For a linked worktree of a submodule, setup's `worktree-config` step pins
 `core.worktree` to that checkout's absolute path in its own
@@ -750,6 +760,16 @@ never changes the caller's recursion policy.
 
 Configure `workbench.worktree` (or `agentic.worktree`):
 
+- `shell = { kind = "auto"; attr = "default"; required = false; }`: shell
+  declaration stays in this Nix module, not a per-worktree file. Auto selects
+  devenv when `devenv.nix` exists and `devenv` is on PATH, otherwise flake
+  when `flake.nix` exists, otherwise none. Explicit kinds are `none`, `flake`
+  and `devenv`. Discovery applies only to flake. Warm-up applies to devenv,
+  or flake only when `devShells.<current-system>.<attr>` exists; absent shells
+  are not-applicable with a reason. Flake warm-up runs
+  `nix develop .#<attr> --impure -c true`. Discovery/warm-up failures degrade
+  setup and later steps still run unless `required = true`, which stops setup.
+  Other steps retain their existing required/fail-stop behavior.
 - `traits.submodules`: recursively initialize declared submodules (default false).
   If off while `.gitmodules` has entries, setup warns once naming
   `agentic.worktree.traits.submodules` and records `skipped: "trait-off"`;
@@ -794,7 +814,12 @@ registry configuration.
 
 Setup atomically writes `workbench-setup.json` inside the target's own
 `git rev-parse --absolute-git-dir`, including on failure after Git discovery.
-It contains `status` (`ok|failed`), `failedStep` (string or null),
+Record v2 contains `schema: "workbench.worktree-setup/2"` and ordered
+`steps`: each has `name`, `applies`, `outcome` (`ok|failed|not-applicable`),
+`required`, and optional `reason`, `exitCode`, `message`. Overall `status`
+is `ok|degraded|failed`: degraded means only non-required steps failed.
+`blocked` is reserved for later service setup and is not emitted.
+Existing fields remain: `failedStep` (first degraded failure, fatal step, or null),
 `warmUp` (`{status, exitCode}`, with status `not-run|skipped|ok|failed`),
 UTC `startedAt`/`finishedAt` timestamps, and `setupCommand` (the canonical
 executable's store path). `submodules` contains `configured` (the trait boolean),
@@ -810,13 +835,17 @@ exits nonzero; invalid arguments exit 64. Check mode does not run setup or hooks
 | 0 | Current successful record | Continue observing actual harness readiness |
 | 1 | Failed or malformed record | Investigate, then rerun setup |
 | 2 | Missing record (or inaccessible checkout) | Run setup for the returned path |
-| 3 | Record from a different setup store path | Rerun the current setup command |
+| 3 | v1 record (no schema), or different setup store path | Rerun the current setup command |
 | 4 | Not a linked worktree (a main checkout, or no repository) | Nothing; setup does not apply |
+| 5 | Current degraded record | Review the non-required failures; rerun or explicitly accept for worker start |
 
 Every nonzero check prints one stderr line naming the worktree and its state;
-codes 1–3 add the `workbench-worktree-setup --worktree <path>` action, and code
+codes 1–3 and 5 add the `workbench-worktree-setup --worktree <path>` action, and code
 4 says setup does not apply, so a launcher can stay silent on it. A changed setup command
-takes precedence over an older record's success/failure. These records do not
+takes precedence over an older record's success/failure. `--check --json <path>`
+also prints `{status, code, digest, record}`; digest is SHA-256 of the exact
+record bytes, or null when no record exists. A missing/malformed record is
+never accepted as degraded. These records do not
 grant trust, prove mesh acceptance, replace native harness status or authorize
 cleanup. Repository owners retain their safety flags and external-resource
 lifecycle policy.

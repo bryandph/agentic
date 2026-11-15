@@ -28,6 +28,8 @@ def main():
     parser.add_argument("--pane", required=True)
     parser.add_argument("--worktree", required=True)
     parser.add_argument("--timeout", type=float, default=30, help="seconds (default: 30)")
+    parser.add_argument("--accept-setup", metavar="DIGEST")
+    parser.add_argument("--reason")
     parser.add_argument("launcher", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     argv = args.launcher
@@ -40,6 +42,7 @@ def main():
     evidence = ""
     diagnostics = []
     explanation = {}
+    setup_override = None
 
     def run(command, timeout=5):
         try:
@@ -66,13 +69,29 @@ def main():
                       visible_blocker=explanation.get("visible_blocker"),
                       diagnostics=tail("\n".join(diagnostics)),
                       ts=datetime.datetime.now(datetime.timezone.utc).isoformat())
+        if setup_override is not None:
+            record["setupOverride"] = setup_override
         print(json.dumps(record))
-        return {"started": 0, "blocked": 10, "not-started": 11, "launch-failed": 20, "setup-failed": 30}[status]
+        return {"started": 0, "blocked": 10, "not-started": 11, "launch-failed": 20, "setup-failed": 30, "setup-degraded": 31}[status]
 
-    code, out, err = run([os.environ["AGENTIC_WORKTREE_SETUP"], "--check", worktree], timeout=30)
-    if code:
+    code, out, err = run([os.environ["AGENTIC_WORKTREE_SETUP"], "--check", "--json", worktree], timeout=30)
+    if code == 5:
+        diagnostics.append(err)
+        try:
+            check = json.loads(out)
+        except ValueError:
+            check = {}
+        digest = check.get("digest") if isinstance(check, dict) else None
+        if not args.accept_setup or not args.reason or not args.reason.strip():
+            return finish("setup-degraded", "degraded setup requires --accept-setup <digest> and a non-empty --reason")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest) or args.accept_setup != digest:
+            return finish("setup-degraded", "setup digest mismatch: accepted " + args.accept_setup + "; current " + str(digest))
+        setup_override = dict(digest=digest, reason=args.reason, status="degraded")
+    elif code:
         diagnostics.append(out + err)
         return finish("setup-failed", "worktree setup check failed")
+    elif args.accept_setup:
+        setup_override = dict(digest=args.accept_setup, reason=args.reason, status="unused")
     for index, arg in enumerate(argv):
         if arg == "--prompt-file" or arg.startswith("--prompt-file="):
             path = arg.split("=", 1)[1] if "=" in arg else (argv[index + 1] if index + 1 < len(argv) else "")

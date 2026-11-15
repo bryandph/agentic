@@ -78,16 +78,23 @@ herdr worktree remove --workspace <returned-workspace-id>
 ```
 
 Wait for setup before launching. Check exits 0 for current success, 1 for
-failure, 2 for a missing result and 3 for a stale setup executable. A nonzero
-check emits one actionable warning, **never a launcher block**. Act on the
-warning; do not mistake process launch for setup success or assignment
+failure, 2 for a missing result, 3 for a stale executable or v1 record, 4 for
+a non-linked checkout, and 5 for degraded setup. `--check --json <path>`
+prints the record and its SHA-256 digest. Worker start refuses degraded setup
+(31) unless the coordinator reviews and passes `--accept-setup <digest>`
+and a non-empty `--reason`; failed/missing/stale/non-linked setup is never
+overridable (30). Do not mistake process launch for setup success or assignment
 acceptance. Trust projection is also warning-only; an actual Pi trust or
 authentication prompt still needs operator attention. Core never grants trust.
 
 Setup runs declared recursive submodule initialization, file copies, state and
 Git-hook isolation, shell warm-up, then ordered `workbench.worktree.setupHooks`.
 Its JSON result lives in the worktree's own gitdir, not a shared checkout file.
-Warm-up failure is recorded as failure. `agentic-worktree-setup` remains an
+Record v2 lists each step's applicability and outcome. Shell selection is
+declared in `workbench.worktree.shell`: auto prefers available devenv, then
+flake, otherwise none. Missing devShell attributes are not-applicable.
+Discovery and warm-up failure degrade setup and allow hooks to continue unless
+`shell.required = true`; other steps remain required. `agentic-worktree-setup` remains an
 alias for the canonical creator-neutral command.
 
 Each `workbench.worktree.teardownHooks` command must exit zero and print a
