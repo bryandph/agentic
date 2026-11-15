@@ -26,6 +26,62 @@
   cfg = config.agentic.memoryPlane;
   acfg = config.agentic;
 
+  # Canonical runtime ignore policy, shared by the CLI and template check.
+  runtimeIgnoreLines = {
+    whole = ["/.serena/"];
+    shared = [".serena/cache/" ".serena/project.local.yml" ".serena/memories/knowledge/"];
+    generatedProject = ".serena/project.yml";
+  };
+
+  ignoreCheckPackage = pkgs:
+    pkgs.writeShellApplication {
+      name = "workbench-serena-ignore";
+      runtimeInputs = [pkgs.git];
+      text = ''
+        path=.
+        if [ "$#" != 0 ]; then
+          if [ "$#" != 2 ] || [ "$1" != --worktree ]; then
+            echo 'usage: workbench-serena-ignore [--worktree <path>]' >&2
+            exit 1
+          fi
+          path=$2
+        fi
+        root=$(git -C "$path" rev-parse --show-toplevel)
+        cd "$root"
+        lines=(${lib.escapeShellArgs runtimeIgnoreLines.whole})
+        if [ -n "$(git ls-files -- .serena)" ]; then
+          lines=(${lib.escapeShellArgs runtimeIgnoreLines.shared})
+          if ! git ls-files --error-unmatch -- .serena/project.yml >/dev/null 2>&1; then
+            lines+=(${lib.escapeShellArg runtimeIgnoreLines.generatedProject})
+          fi
+        fi
+        failed=0
+        for line in "''${lines[@]}"; do
+          # Directory probes work even before Serena creates the directory.
+          if ! git check-ignore -q -- "''${line#/}"; then
+            failed=1
+          fi
+        done
+        if [ -n "$(git ls-files --others --exclude-standard -- .serena)" ]; then
+          failed=1
+        fi
+        if [ "$failed" != 0 ]; then
+          printf 'Serena runtime is not ignored. Add to %s/.gitignore:\n' "$root"
+          printf '%s\n' "''${lines[@]}"
+          exit 1
+        fi
+      '';
+    };
+
+  ignoreWarningScript = pkgs: ''
+    # Advisory only: never edit ignore policy or affect setup status.
+    if command -v git >/dev/null 2>&1 && git rev-parse --show-toplevel >/dev/null 2>&1; then
+      if ! serena_ignore_fix="$(${ignoreCheckPackage pkgs}/bin/workbench-serena-ignore 2>&1)"; then
+        printf 'Warning: %s (run workbench-serena-ignore)\n' "''${serena_ignore_fix//$'\n'/; }" >&2
+      fi
+    fi
+  '';
+
   memoryTexts =
     lib.mapAttrs' (name: f: lib.nameValuePair "${name}.md" f.text) acfg.knowledge
     // lib.mapAttrs' (name: path: lib.nameValuePair "${name}.md" (builtins.readFile path)) cfg.deepSources;
@@ -122,14 +178,17 @@ in {
         `projectYml pkgs`, `placeScript pkgs` (idempotent shell
         placement), `checkScript pkgs` (reference integrity gate),
         `namespaceCheckScript pkgs` (opt-in root memory namespace gate),
-        `namespaceCheckPackage pkgs` (standalone CLI for the same gate).
+        `namespaceCheckPackage pkgs` (standalone CLI for the same gate),
+        `runtimeIgnoreLines` (canonical Serena runtime ignore policy),
+        `ignoreCheckPackage pkgs` (read-only workbench-serena-ignore CLI),
+        `ignoreWarningScript pkgs` (best-effort shell-entry diagnostic).
         Check scripts run from the repository root.
       '';
     };
   };
 
   config.agentic.memoryPlane.lib = {
-    inherit memoriesDir projectYml placeScript;
+    inherit memoriesDir projectYml placeScript runtimeIgnoreLines ignoreCheckPackage ignoreWarningScript;
     namespaceCheckPackage = pkgs:
       pkgs.writeShellScriptBin "serena-memory-namespaces" ''
         set -euo pipefail

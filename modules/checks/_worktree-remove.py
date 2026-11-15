@@ -82,6 +82,11 @@ def fixture(name, *, hook=good, agent="done", main=False, sub=False, dirty=None,
         (path / "tracked").write_text("keep tracked edits\n")
     if dirty == "untracked":
         (path / "untracked").write_text("keep untracked file\n")
+    if dirty in ("serena", "mixed-serena"):
+        (path / ".serena" / "cache").mkdir(parents=True)
+        (path / ".serena" / "cache" / "runtime").write_text("keep runtime file\n")
+        if dirty == "mixed-serena":
+            (path / "untracked").write_text("keep unrelated file\n")
     if dirty == "sub":
         (path / "sub" / "untracked").write_text("keep nested file\n")
         git(path, "config", "submodule.sub.ignore", "all")
@@ -113,6 +118,9 @@ def fixture(name, *, hook=good, agent="done", main=False, sub=False, dirty=None,
     removals = [call for call in calls if call[:2] == ["worktree", "remove"]]
     success = hook == good and agent == "done" and not (main or dirty or mismatch or refuse)
     assert data["status"] == ("removed" if success else "refused"), data
+    assert ("workbench-serena-ignore" in data["reason"]) == (dirty == "serena"), data
+    if dirty in ("serena", "mixed-serena"):
+        assert (path / ".serena" / "cache" / "runtime").read_text() == "keep runtime file\n"
     assert result.returncode == (0 if success else 1), data
     expected = [["worktree", "remove", "--workspace", "fixture"]] if success or refuse else []
     if success and sub:
@@ -143,6 +151,8 @@ try:
     fixture("teardown-skipped", hook=skipped)
     fixture("dirty-tracked", dirty="tracked")
     fixture("untracked", dirty="untracked")
+    fixture("serena-only", dirty="serena")
+    fixture("mixed-serena", dirty="mixed-serena")
     fixture("agent-working", agent="working")
     fixture("agent-blocked", agent="blocked")
     fixture("main-checkout", main=True)

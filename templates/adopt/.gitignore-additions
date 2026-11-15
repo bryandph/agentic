@@ -7,4 +7,5 @@ result-*
 .mcp.json
 opencode.json
 .pre-commit-config.yaml
+/.serena/
 .serena/memories/knowledge/
