@@ -676,6 +676,9 @@ observations, not a competing work/assignment journal or authorization to merge.
 
 ### Worktree setup and verified teardown
 
+See the [runner contract](docs/runner-contract.md) for the same declaration,
+setup evidence and safety gates across Herdr and future sandbox or pod paths.
+
 Both shell transports include `workbench-worktree-setup`,
 `workbench-worktree-teardown`, `workbench-worker-start`, and
 `workbench-worktree-remove`. Run them from any shell that carries them,
