@@ -25,12 +25,16 @@ with tempfile.TemporaryDirectory() as root:
     # The baked sibling executes this fixture outside PATH. No setup command
     # is available by name in the shell that carries worker-start.
     setup = root / "setup.py"
-    setup.write_text('''import os,sys
+    setup.write_text('''import os,sys,json
 assert sys.argv[1] == "--check"
 case = os.environ["CASE"]
 if case in ("setup-missing", "setup-failed"):
     print("worktree setup " + case, file=sys.stderr)
     sys.exit(2 if case == "setup-missing" else 1)
+status = os.environ.get("SETUP_STATUS", "ok")
+code = {"ok":0, "degraded":5, "failed":1, "missing":2, "stale":3, "not-applicable":4}[status]
+print(json.dumps(dict(status=status, code=code, digest="a"*64, record={})))
+sys.exit(code)
 ''')
     executable("launcher", '''import os,sys,json
 from pathlib import Path
@@ -147,6 +151,35 @@ else: raise AssertionError(a)
         if case == "timeout":
             assert "timeout" in record["reason"]
         print(case, "ok")
+
+    # Review is bound to the exact setup record, never a blanket bypass.
+    for setup_status, options, code, status in [
+        ("degraded", [], 31, "setup-degraded"),
+        ("degraded", ["--accept-setup", "a"*64, "--reason", "reviewed shell failure"], 0, "started"),
+        ("degraded", ["--accept-setup", "b"*64, "--reason", "reviewed"], 31, "setup-degraded"),
+        ("degraded", ["--accept-setup", "a"*64, "--reason", "  "], 31, "setup-degraded"),
+        ("ok", ["--accept-setup", "a"*64, "--reason", "no longer needed"], 0, "started"),
+        *[(s, ["--accept-setup", "a"*64, "--reason", "cannot override"], 30, "setup-failed")
+          for s in ("failed", "missing", "stale", "not-applicable")],
+    ]:
+        for name in ("launched", "tail", "calls", "argv"):
+            (root / name).unlink(missing_ok=True)
+        result = subprocess.run([sys.argv[1], "--pane", "w:p", "--worktree", str(root),
+                                 *options, "--", "launcher"],
+                                env=dict(env, CASE="started", SETUP_STATUS=setup_status),
+                                capture_output=True, text=True)
+        assert result.returncode == code, (setup_status, options, result)
+        record = json.loads(result.stdout)
+        assert record["status"] == status, record
+        assert (root / "launched").exists() == (code == 0)
+        if code == 0:
+            expected = (dict(digest="a"*64, reason="reviewed shell failure", status="degraded")
+                        if setup_status == "degraded" else
+                        dict(digest="a"*64, reason="no longer needed", status="unused"))
+            assert record["setupOverride"] == expected, record
+        elif options and options[1] == "b"*64:
+            assert "digest mismatch" in record["reason"]
+        print("override", setup_status, options, "ok")
 
     # An unavailable setup command must also yield one structured record.
     setup.unlink()
