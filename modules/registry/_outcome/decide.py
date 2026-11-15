@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import sys
 
-from outcome import load_valid, parse_json, read_json, validate
+from outcome import load_valid, parse_json, read_json, rfc3339, validate
 
 
 DECISION_KEYS = {"schema", "decisionId", "assignment", "question", "options", "recommendation", "scope"}
@@ -84,6 +84,35 @@ def check_answer(decision, value):
         raise ValueError("note must be a string")
 
 
+def nix_string(value):
+    # Escape Nix interpolation as well as string delimiters. Keep Unicode
+    # literal: JSON's \\u (and \\b/\\f) escapes are not Nix escapes.
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("${", r"\${")
+    for char, replacement in (("\n", r"\n"), ("\r", r"\r"), ("\t", r"\t")):
+        escaped = escaped.replace(char, replacement)
+    return '"' + escaped + '"'
+
+
+def promote(decision, answer, granted_by, granted_at):
+    check_answer(decision, answer)
+    if not answer["promote"]:
+        raise ValueError("promotion requires promote: true in the answer")
+    if not re.fullmatch(r"[a-z0-9-]+", decision["decisionId"]):
+        raise ValueError("standing rule id must be a [a-z0-9-] token")
+    if not granted_by.strip():
+        raise ValueError("granted-by must name the grantor")
+    if not rfc3339(granted_at):
+        raise ValueError("granted-at must be an RFC 3339 date-time with timezone")
+    option = next(o for o in decision["options"] if o["id"] == answer["option"])
+    rule = f"{plain(option['label'])} — {plain(option['consequences'])} Scope: {plain(decision['scope'])}"
+    source = "decision:" + decision["decisionId"]
+    if "issue" in decision["assignment"]:
+        source += " " + decision["assignment"]["issue"]
+    entry = {"id": decision["decisionId"], "rule": rule, "source": source,
+             "grantedBy": granted_by, "grantedAt": granted_at}
+    return "{\n" + "".join(f"  {key} = {nix_string(value)};\n" for key, value in entry.items()) + "}\n"
+
+
 def adapter():
     name = os.environ.get("WORKBENCH_DECIDE_ADAPTER")
     if name == "cotal":
@@ -134,11 +163,14 @@ class Parser(argparse.ArgumentParser):
 def main():
     parser = Parser(description=__doc__, allow_abbrev=False)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("prompt", "parse", "check-answer"):
+    for name in ("prompt", "parse", "check-answer", "promote"):
         sub = commands.add_parser(name, allow_abbrev=False)
         sub.add_argument("file")
-        if name == "check-answer":
+        if name in ("check-answer", "promote"):
             sub.add_argument("answer")
+        if name == "promote":
+            sub.add_argument("--granted-by", required=True)
+            sub.add_argument("--granted-at", required=True)
     commands.add_parser("queue", allow_abbrev=False).add_argument("--json", action="store_true")
     sub = commands.add_parser("answer", allow_abbrev=False)
     for flag in ("run", "decision", "option"):
@@ -149,10 +181,12 @@ def main():
         args = parser.parse_args()
         if args.command == "prompt":
             print(prompt(from_outcome(load_valid(args.file))), end="")
-        elif args.command in ("parse", "check-answer"):
+        elif args.command in ("parse", "check-answer", "promote"):
             decision = parse_prompt(Path(args.file).read_text())
             if args.command == "parse":
                 print(json.dumps(decision))
+            elif args.command == "promote":
+                print(promote(decision, read_json(args.answer), args.granted_by, args.granted_at), end="")
             else:
                 check_answer(decision, read_json(args.answer))
         else:

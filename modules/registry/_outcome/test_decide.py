@@ -144,6 +144,50 @@ class Decisions(unittest.TestCase):
             file.write_text(json.dumps(invalid))
             self.assertNotEqual(self.cli("check-answer", str(self.prompt), str(file)).returncode, 0)
 
+    def test_promote(self):
+        file = self.root / "answer.json"
+        file.write_text(json.dumps({**ANSWER, "promote": True}))
+        before = {p: p.read_bytes() for p in (file, self.prompt, self.fake)}
+        args = ("promote", str(self.prompt), str(file), "--granted-by", "human:fixture",
+                "--granted-at", "2026-11-15T08:00:00Z")
+        result = self.cli(*args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '{\n'
+                         '  id = "transport";\n'
+                         '  rule = "A — Reuse setup. Scope: Select the transport only.";\n'
+                         '  source = "decision:transport BPH-66";\n'
+                         '  grantedBy = "human:fixture";\n'
+                         '  grantedAt = "2026-11-15T08:00:00Z";\n'
+                         '}\n')
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+        for key, value in [("promote", False), ("option", "missing"), ("scope", "broader"),
+                           ("decisionId", "wrong"), ("schema", "wrong"), ("promote", "true")]:
+            with self.subTest(key=key, value=value):
+                file.write_text(json.dumps({**ANSWER, "promote": True, key: value}))
+                self.refused(self.cli(*args), before[self.fake])
+        file.write_text(json.dumps({**ANSWER, "promote": True}))
+        for flag, value in [("--granted-by", ""), ("--granted-at", "2026-11-15"),
+                            ("--granted-at", "2026-02-30T00:00:00Z")]:
+            self.refused(self.cli(*args, flag, value), before[self.fake])
+        for missing in ("--granted-by", "--granted-at"):
+            shortened = list(args)
+            index = shortened.index(missing)
+            del shortened[index:index + 2]
+            self.refused(self.cli(*shortened), before[self.fake])
+        decision = copy.deepcopy(DECISION)
+        del decision["assignment"]["issue"]
+        literal = decide.promote(decision, {**ANSWER, "promote": True}, "human:fixture",
+                                 "2026-11-15T08:00:00+00:00")
+        self.assertIn('source = "decision:transport";', literal)
+        decision["decisionId"] = "Bad ID"
+        with self.assertRaisesRegex(ValueError, "token"):
+            decide.promote(decision, {**ANSWER, "decisionId": "Bad ID", "promote": True},
+                           "human:fixture", "2026-11-15T08:00:00Z")
+
+    def test_nix_quoting(self):
+        self.assertEqual(decide.nix_string('"${value}\\\n\t雪'),
+                         r'"\"\${value}\\\n\t雪"')
+
     def test_invalid_decision_contract(self):
         with self.assertRaises(ValueError):
             decide.from_outcome({"kind": "result"})

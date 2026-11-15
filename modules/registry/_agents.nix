@@ -45,6 +45,36 @@
   };
   authorityListType = lib.types.listOf (lib.types.enum (lib.attrNames authorityActions));
 
+  standingDateType =
+    lib.types.addCheck
+    (lib.types.strMatching "[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)([.][0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])")
+    (value: let
+      number = start: length: builtins.foldl' (n: digit: n * 10 + builtins.fromJSON digit) 0 (lib.stringToCharacters (builtins.substring start length value));
+      year = number 0 4;
+      month = number 5 2;
+      day = number 8 2;
+      leap = lib.mod year 4 == 0 && (lib.mod year 100 != 0 || lib.mod year 400 == 0);
+      days = [
+        31
+        (
+          if leap
+          then 29
+          else 28
+        )
+        31
+        30
+        31
+        30
+        31
+        31
+        30
+        31
+        30
+        31
+      ];
+    in
+      day <= builtins.elemAt days (month - 1));
+
   reasoningEffortType = lib.types.nullOr (lib.types.enum ["minimal" "low" "medium" "high" "xhigh" "max" "ultra"]);
   profileType = lib.types.submodule {
     options = let
@@ -117,6 +147,34 @@
       };
 
       authority = {
+        standing = lib.mkOption {
+          type = lib.types.listOf (lib.types.submodule {
+            options = {
+              id = lib.mkOption {
+                type = lib.types.strMatching "[a-z0-9-]+";
+                description = "Standing rule token, unique within this agent.";
+              };
+              rule = lib.mkOption {
+                type = lib.types.str;
+                description = "One plain sentence describing exactly what may be done without asking, within the agent's scope.";
+              };
+              source = lib.mkOption {
+                type = lib.types.str;
+                description = "Where this grant was decided, such as decision:<id> and an issue id.";
+              };
+              grantedBy = lib.mkOption {
+                type = lib.types.str;
+                description = "Who granted this rule, such as human:<name>.";
+              };
+              grantedAt = lib.mkOption {
+                type = standingDateType;
+                description = "RFC 3339 date-time at which the rule was granted.";
+              };
+            };
+          });
+          default = [];
+          description = "Reviewed, narrow standing grants within scope; decision classes still apply to everything these rules do not cover.";
+        };
         autonomous = lib.mkOption {
           type = authorityListType;
           default = [];
@@ -272,6 +330,8 @@
       lib.assertMsg (duplicates agent.authority.${list} == [])
       "agentic.agents.${name}: authority.${list} has duplicate classes: ${lib.concatStringsSep ", " (duplicates agent.authority.${list})}")
     ["autonomous" "decision"];
+    assert lib.assertMsg (duplicates (map (entry: entry.id) agent.authority.standing) == [])
+    "agentic.agents.${name}: authority.standing has duplicate ids: ${lib.concatStringsSep ", " (duplicates (map (entry: entry.id) agent.authority.standing))}";
     assert lib.assertMsg (duplicates agent.cotal.capabilities == [])
     "agentic.agents.${name}: cotal.capabilities has duplicates: ${lib.concatStringsSep ", " (duplicates agent.cotal.capabilities)}";
     assert lib.all (target:
@@ -301,7 +361,8 @@
       else "the peer with Cotal role `${cfg.agents.${agent.cotal.escalateTo}.cotal.role}` (find that peer on the roster by role)";
   in
     lib.optionalString (agent.authority.autonomous != []) "You may do these without asking: ${describe agent.authority.autonomous}.\n"
-    + lib.optionalString (agent.authority.decision != []) "These go to ${target} as decisions: ${describe agent.authority.decision}.\n";
+    + lib.optionalString (agent.authority.decision != []) "These go to ${target} as decisions: ${describe agent.authority.decision}.\n"
+    + lib.optionalString (agent.authority.standing != []) "Standing rules (apply without asking, only exactly as written): ${lib.concatStringsSep "; " (map (entry: "${entry.rule} (${entry.id})") agent.authority.standing)}\n";
 
   capabilitySentences = agent: ''
     File edits: ${

@@ -44,6 +44,9 @@ and Cotal ask shorthand.
 open decisions, and verifies scoped, single-use answers. It ships in the same
 package and shells. The fake adapter is offline; the isolated Cotal adapter is
 **UNVERIFIED** and requires explicit opt-in. See [decision queue](docs/decision-queue.md).
+Answered decisions with `promote: true` can be exported as reviewed registry
+standing rules with `workbench-decide promote`; see [agent authority and standing
+rules](docs/authority.md#standing-rules).
 
 ## Host attention watcher (opt-in)
 
