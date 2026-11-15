@@ -881,6 +881,16 @@ skips qmd startup entirely. Refresh is best-effort with a
 10-second timeout; errors, timeouts, or configured qmd update hooks produce one warning
 and do not prevent shell entry.
 
+### Serena runtime files
+
+Shell entry warns when Serena runtime files are not ignored. Run
+`workbench-serena-ignore [--worktree <path>]` to print the exact lines to add to
+the repository-root `.gitignore`; the command never edits files. Repositories
+without tracked Serena content ignore `/.serena/`. Those tracking memories ignore
+only cache, local config, generated knowledge, and untracked `project.yml`, keeping
+agent-written memories visible. Worktree removal still refuses dirty or untracked
+Serena paths and points to this check; it never deletes or allowlists them.
+
 ### Serena memory namespaces
 
 The generated `.serena/memories/knowledge/` namespace is a derived view. Consumers

@@ -18,6 +18,7 @@
       imports = [
         config.flake.flakeModules.default
         ({config, ...}: {
+          flake.lib.runtimeIgnoreLines = config.agentic.memoryPlane.lib.runtimeIgnoreLines;
           agentic.knowledge = {
             fixture-conventions.file = ./_fixtures/fixture-conventions.md;
             fixture-review.file = ./_fixtures/fixture-review.md;
@@ -54,10 +55,12 @@
         # The workspace template instead ignores everything by default.
         for ignore in default/.gitignore rust/.gitignore python/.gitignore \
           polyglot/.gitignore embedded/.gitignore adopt/.gitignore-additions; do
-          if ! grep -qxF '.serena/memories/knowledge/' "$templates/$ignore"; then
-            echo "$ignore must ignore .serena/memories/knowledge/" >&2
-            exit 1
-          fi
+          for line in ${inputs.nixpkgs.lib.escapeShellArgs ([".serena/memories/knowledge/"] ++ fixture.lib.runtimeIgnoreLines.whole)}; do
+            if ! grep -qxF "$line" "$templates/$ignore"; then
+              echo "$ignore must ignore $line" >&2
+              exit 1
+            fi
+          done
         done
 
         export HOME="$TMPDIR/home"

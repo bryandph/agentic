@@ -59,7 +59,10 @@ def clean(path):
             paths.append(decode(entry[3:]))
             if entry[:1] in (b"R", b"C") or entry[1:2] in (b"R", b"C"):
                 paths.append(decode(entries.pop(0)))
-        raise Refusal("dirty or untracked paths: " + json.dumps(paths, ensure_ascii=True))
+        reason = "dirty or untracked paths: " + json.dumps(paths, ensure_ascii=True)
+        if paths and all(item.startswith(".serena/") for item in paths):
+            reason += "; hint: run workbench-serena-ignore --worktree " + json.dumps(path) + " for repo-root .gitignore lines"
+        raise Refusal(reason)
     # --quiet suppresses foreach headings, not the nested command's stdout.
     nested = git(path, "submodule", "foreach", "--quiet", "--recursive",
                  "git status --porcelain=v1 --untracked-files=all --ignore-submodules=none")

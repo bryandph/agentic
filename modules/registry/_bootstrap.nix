@@ -78,6 +78,7 @@
     ${acfg.agentsLib.placeScript pkgs}
     # Knowledge memory plane: generated namespace + project.yml.
     ${acfg.memoryPlane.lib.placeScript pkgs}
+    ${acfg.memoryPlane.lib.ignoreWarningScript pkgs}
     ${lib.optionalString (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.refreshScript pkgs)}
     # Work tracking: core-owned Backlog.md project config.
     ${acfg.workTracking.lib.placeScript pkgs}
@@ -103,7 +104,7 @@ in {
     # equivalent Pi relies on), when the consumer declares collections,
     # and `backlog` when work tracking is enabled.
     packages = pkgs:
-      [(acfg.worktreeLib.setupScript pkgs) (acfg.worktreeLib.teardownScript pkgs) (acfg.worktreeLib.workerStartScript pkgs) (acfg.worktreeLib.removeScript pkgs) (import ../_git-hooks/package.nix pkgs) (import ./_seat-tools/package.nix pkgs "agentic-seat-snapshot") (acfg.worktreeLib.workerRecoverScript pkgs) (import ../_attention-watch/package.nix {inherit pkgs;}) (import ./_outcome/package.nix {inherit pkgs;})]
+      [(acfg.memoryPlane.lib.ignoreCheckPackage pkgs) (acfg.worktreeLib.setupScript pkgs) (acfg.worktreeLib.teardownScript pkgs) (acfg.worktreeLib.workerStartScript pkgs) (acfg.worktreeLib.removeScript pkgs) (import ../_git-hooks/package.nix pkgs) (import ./_seat-tools/package.nix pkgs "agentic-seat-snapshot") (acfg.worktreeLib.workerRecoverScript pkgs) (import ../_attention-watch/package.nix {inherit pkgs;}) (import ./_outcome/package.nix {inherit pkgs;})]
       ++ lib.optional acfg.memoryPlane.namespaces.require (acfg.memoryPlane.lib.namespaceCheckPackage pkgs)
       ++ lib.optional (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.wrapper pkgs)
       ++ lib.optional (acfg.workTracking.prefix != null && acfg.workTracking.lib.package pkgs != null) (acfg.workTracking.lib.package pkgs);
