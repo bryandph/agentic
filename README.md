@@ -982,8 +982,13 @@ directs decisions and escalations to that role through roster lookup, since
 presence names change on restart. `packages.<system>.cotal-personas` is the link
 farm; the environment places it at its space root, since a persona catalog
 belongs to a mesh, not a project. Neither MCP requirements nor escalation targets
-are frontmatter keys. No Cotal control-plane capability (`spawn`, `run`) is
-rendered: starting agents is the environment's launcher concern.
+are frontmatter keys. Cotal control-plane capabilities (`spawn`, `run`) are
+rendered only from the explicit `cotal.capabilities` list (default `[]`, no
+duplicates). A non-empty list becomes a `capabilities` frontmatter key after the
+ACLs; an empty list emits no key. `spawn` grants spawning, stopping own children
+and persona definition; `run` adds workflow-run commands to the spawn set. Tags
+are still not grants, and starting agents remains the environment's launcher
+concern.
 
 ### CI cache profile contract
 

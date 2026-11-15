@@ -88,7 +88,10 @@
         decision-seat = {
           description = "Fixture escalation target.";
           platforms = ["cotal"];
-          cotal.role = "coordinator";
+          cotal = {
+            role = "coordinator";
+            capabilities = ["run"];
+          };
         };
       };
 
@@ -165,6 +168,19 @@
       };
       flake.agenticProbe.body = config.agentic.agentsLib.renderCotal "broken" config.agentic.agents.broken;
     }) "body";
+
+    invalidCotalCapabilitiesFails = capabilities:
+      failing ({config, ...}: {
+        agentic.agents.broken = {
+          description = "invalid declared Cotal capabilities";
+          platforms = ["cotal"];
+          cotal = {
+            role = "relay";
+            inherit capabilities;
+          };
+        };
+        flake.agenticProbe.body = config.agentic.agentsLib.renderCotal "broken" config.agentic.agents.broken;
+      }) "body";
 
     unknownDelegateFails = lib.all (renderer:
       failing ({config, ...}: {
@@ -291,6 +307,8 @@
       assert !(lib.hasInfix "model:" p.relayCotal);
       assert cotalRoleMissingFails;
       assert cotalUnknownMcpFails;
+      assert invalidCotalCapabilitiesFails ["unknown"];
+      assert invalidCotalCapabilitiesFails ["run" "run"];
       assert unknownDelegateFails;
       assert invalidEscalationFails "undefined-agent";
       assert invalidEscalationFails "non-cotal";
@@ -412,6 +430,9 @@
           assert relay['allowPublish'] == ['general']
           assert relay['tags'] == ['mesh', 'edit', 'exec']
           assert 'capabilities' not in relay
+          decision_seat_path = pathlib.Path(os.environ['personas'] + '/decision-seat.md')
+          assert frontmatter(decision_seat_path)['capabilities'] == ['run']
+          assert 'allowPublish: []\ncapabilities: ["run"]\n---' in decision_seat_path.read_text()
           assert 'mcp' not in relay
           assert 'escalateTo' not in relay
           assert 'Fixture review card' in pathlib.Path(os.environ['personas'] + '/relay.md').read_text()
