@@ -6,7 +6,15 @@
       runtimeInputs = [pkgs.python3 pkgs.git];
       text = ''
         export AGENTIC_OUTCOME_SCHEMA=${../../../schemas/agentic.outcome-1.json}
-        exec python3 ${./outcome.py} ${mode} "$@"
+        exec python3 ${./.}/${
+          if mode == "decide"
+          then "decide.py"
+          else "outcome.py"
+        } ${
+          if mode == "decide"
+          then ""
+          else mode
+        } "$@"
       '';
     };
 in
@@ -15,5 +23,6 @@ in
     paths = [
       (command "workbench-outcome" "outcome")
       (command "workbench-verify" "verify")
+      (command "workbench-decide" "decide")
     ];
   }
