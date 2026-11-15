@@ -78,6 +78,7 @@
     ${acfg.agentsLib.placeScript pkgs}
     # Knowledge memory plane: generated namespace + project.yml.
     ${acfg.memoryPlane.lib.placeScript pkgs}
+    ${lib.optionalString (acfg.knowledgeSearch.collections != {}) (acfg.knowledgeSearch.lib.refreshScript pkgs)}
     # Work tracking: core-owned Backlog.md project config.
     ${acfg.workTracking.lib.placeScript pkgs}
     ${lib.optionalString (acfg.secrets.backend == "secretspec" && acfg.secrets.managedEnvironment != []) ''

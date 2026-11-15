@@ -54,6 +54,87 @@
         cfg.collections)}
       exec ${qmd} "$@"
     '';
+  # qmd update is text-only and content-hash incremental, but it also
+  # executes user-configured update hooks. Never run those at shell entry.
+  refreshScript = pkgs: let
+    refresh = pkgs.writeShellScript "qmd-knowledge-refresh" ''
+      set -euo pipefail
+      export PATH=${lib.makeBinPath [pkgs.coreutils pkgs.findutils]}:$PATH
+      config=
+      ${lib.optionalString (cfg.index == "local") ''
+        # The wrapper will initialise here, not use a parent index.
+        if [ ! -d .qmd ]; then
+          config="$PWD/.qmd/index.yml"
+        fi
+      ''}
+      dir="$PWD"
+      while [ -z "$config" ]; do
+        for name in index.yaml index.yml; do
+          if [ -f "$dir/.qmd/$name" ]; then
+            config="$dir/.qmd/$name"
+            break
+          fi
+        done
+        [ -z "$config" ] || break
+        [ "$dir" != / ] || break
+        dir="''${dir%/*}"
+        dir="''${dir:-/}"
+      done
+      if [ -z "$config" ]; then
+        config="''${QMD_CONFIG_DIR:-''${XDG_CONFIG_HOME:-$HOME/.config}/qmd}/index.yml"
+        db="''${INDEX_PATH:-''${XDG_CACHE_HOME:-$HOME/.cache}/qmd/index.sqlite}"
+      else
+        db="''${config%/*}/index.sqlite"
+      fi
+      case "$config" in /*) ;; *) config="$PWD/$config" ;; esac
+      case "$db" in /*) ;; *) db="$PWD/$db" ;; esac
+      stamp="''${db%/*}/.agentic-refresh.sha256"
+      # Hash names and contents, not mtimes: preserved timestamps, removals,
+      # renames and changed declarations must all invalidate the fast path.
+      # Compute BEFORE updating so concurrent edits force another refresh.
+      fingerprint=$(
+        set -e
+        {
+          printf '%s\0' ${lib.escapeShellArg "${wrapper pkgs}"} "$PWD" "$config" "$db"
+          sources=()
+          if [ -f "$config" ]; then
+            sources+=("$config")
+          else
+            printf 'missing-config\0'
+          fi
+          ${lib.concatMapStringsSep "\n" (c: ''
+        printf '%s\0' ${lib.escapeShellArg c.path}
+        collection=${lib.escapeShellArg c.path}
+        case "$collection" in /*) ;; *) collection="$PWD/$collection" ;; esac
+        if [ -e "$collection" ]; then
+          sources+=("$collection")
+        else
+          printf 'missing-collection\0'
+        fi
+      '') (lib.attrValues cfg.collections)}
+          if [ "''${#sources[@]}" -gt 0 ]; then
+            find -L "''${sources[@]}" -type f -print0 | sort -z | xargs -0 -r sha256sum --zero --
+          fi
+        } | sha256sum
+      )
+      if [ -f "$db" ] && [ -f "$stamp" ] && [ "$(<"$stamp")" = "$fingerprint" ]; then
+        exit 0
+      fi
+      if [ -f "$config" ]; then
+        ${pkgs.yq-go}/bin/yq -e '[.collections[] | select(.update != null and .update != "")] | length == 0' "$config" >/dev/null
+      fi
+      ${wrapper pkgs}/bin/qmd-knowledge update
+      temporary=$(mktemp "$stamp.XXXXXXXX")
+      trap 'rm -f "$temporary"' EXIT
+      printf '%s\n' "$fingerprint" > "$temporary"
+      mv -f -- "$temporary" "$stamp"
+    '';
+  in ''
+    # Best effort, offline BM25 refresh; bound startup even if qmd hangs.
+    if ! ${pkgs.coreutils}/bin/timeout --kill-after=1s 10s ${refresh} </dev/null >/dev/null 2>&1; then
+      printf '%s\n' 'agentic: qmd index refresh skipped or failed (update hook, error, or timeout).' >&2
+    fi
+  '';
 in {
   options.agentic.knowledgeSearch = {
     index = lib.mkOption {
@@ -90,13 +171,13 @@ in {
     lib = lib.mkOption {
       type = lib.types.raw;
       readOnly = true;
-      description = "Helpers: `wrapper pkgs` (collection-registering qmd passthrough), `package pkgs`.";
+      description = "Helpers: `wrapper pkgs` (collection-registering qmd passthrough), `package pkgs`, `refreshScript pkgs` (bounded, best-effort text index refresh).";
     };
   };
 
   config = {
     agentic.knowledgeSearch.lib = {
-      inherit wrapper;
+      inherit wrapper refreshScript;
       package = qmdPackage;
     };
 

@@ -819,6 +819,13 @@ grant trust, prove mesh acceptance, replace native harness status or authorize
 cleanup. Repository owners retain their safety flags and external-resource
 lifecycle policy.
 
+When knowledge-search collections are declared, shell entry incrementally refreshes the
+qmd text/BM25 index (project `.qmd/` for `index = "local"`, otherwise the user index),
+without network access, model downloads, or embedding; an unchanged content fingerprint
+skips qmd startup entirely. Refresh is best-effort with a
+10-second timeout; errors, timeouts, or configured qmd update hooks produce one warning
+and do not prevent shell entry.
+
 ### Serena memory namespaces
 
 The generated `.serena/memories/knowledge/` namespace is a derived view. Consumers
