@@ -36,7 +36,7 @@
     };
     serena-usage = {
       file = ../../fragments/serena-usage.md;
-      title = "Serena memory discipline";
+      title = "Serena usage";
     };
   };
 }

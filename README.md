@@ -828,9 +828,12 @@ place the namespace with `agentic.memoryPlane.lib.placeScript pkgs`, as
 `modules/checks/memory-plane.nix` does, because a clean checkout no longer
 contains it.
 
-Serena's `knowledge/` memories remain generated and read-only. Agent-written
-memories belong in other topic subdirectories. To enforce that convention in a
-consumer importing core's flake-parts module:
+Serena's `knowledge/` memories remain generated and read-only. Existing
+memories outside that namespace are read-only reference material. New durable
+repo knowledge belongs in the repository's OKF bundle by pull request (see the
+memory skill); behaviour contracts live in OpenSpec, not in the bundle.
+Consumers can enforce the existing memory namespace policy by importing core's
+flake-parts module and setting:
 
 ```nix
 agentic.memoryPlane.namespaces = {
@@ -843,8 +846,10 @@ This adds `checks.<system>.serena-memory-namespaces`, scanning the committed
 source at `agentic.instructions.selfPath` (default: the consumer's `inputs.self`).
 It lists every non-allowlisted `.serena/memories/*.md` directly at the root and
 fails. Subdirectory memories, including the generated namespace, are unaffected.
-Move a memory with Serena's `rename_memory` so `mem:` references stay valid;
-this check never moves or deletes anything.
+The check's remediation message describes Serena's `rename_memory` for
+preserving `mem:` references during an operator-authorized migration; it is not
+an instruction for agents to modify read-only memories. This check never moves
+or deletes anything.
 
 With the same opt-in, both flake-backed and devenv-native shells receive the
 `serena-memory-namespaces` CLI via `devenvLib.packages`. Run it from the repo

@@ -118,7 +118,7 @@
         agentic.skills.library.memory = {
           canonical = ../skills/memory/SKILL.md;
           title = "Memory";
-          description = "Search, propose and curate this repository's knowledge bundle (Open Knowledge Format): specs, decisions and memory. Use before designing or answering why something is the way it is, when a change touches a contract, and when a session learns something a later session should know.";
+          description = "Search, propose and curate this repository's knowledge bundle (Open Knowledge Format): decisions, architecture, conventions, gotchas, references and playbooks. Use before designing or answering why something is the way it is, when a change touches a contract, and when a session learns something a later session should know.";
         };
       })
 
