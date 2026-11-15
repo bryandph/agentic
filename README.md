@@ -31,6 +31,15 @@ Hard rules:
   core can see (e.g. memories core itself ships) — never a consuming repo's
   artifacts.
 
+## Typed assignment outcomes
+
+`workbench-outcome` validates, extracts, and maps `agentic.outcome/1` records to
+Cotal yields; `workbench-verify` independently re-measures their evidence. Both
+stdlib-only CLIs ship in consumer and contributor shells. Checks require explicit
+`--rerun-checks`; CI/Flux probes remain unknown. See the
+[outcome contract](docs/outcome-contract.md) for the schema, examples, exit codes,
+and Cotal ask shorthand.
+
 ## Host attention watcher (opt-in)
 
 `agentic-attention-watch` is a Python daemon, not an agent. It runs on one
