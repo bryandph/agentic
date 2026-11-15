@@ -11,6 +11,7 @@ read-only memory namespace. Registries SHALL supply those artifacts. Bootstrap
 SHALL be idempotent when its inputs are unchanged. Project MCP files SHALL use
 Devenv's managed-file lifecycle rather than shell-entry `ln` commands. Dynamic
 operations that cannot use managed files MAY remain in shell bootstrap.
+When knowledge-search collections are declared, bootstrap SHALL incrementally refresh the text index without network access or embedding, with a bounded timeout and a single warning rather than failing shell entry on errors or configured update hooks.
 `AGENTS.md` and `CLAUDE.md` SHALL remain committed artifacts governed by
 `agentic-agents`, not shell-entry placements. Bootstrap MUST NOT generate or
 require `.workmux.yaml` after retirement.
