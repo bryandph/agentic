@@ -798,7 +798,7 @@ Configure `workbench.worktree` (or `agentic.worktree`):
   `nix develop .#<attr> --impure -c true`. Discovery/warm-up failures degrade
   setup and later steps still run unless `required = true`, which stops setup.
   The `nix-relativeworktrees` environment blocker always stops setup, regardless
-  of `required`. Other steps retain their existing required/fail-stop behavior.
+  of `required`. Built-in steps other than shell discovery/warm-up remain required.
 - `traits.submodules`: recursively initialize declared submodules (default false).
   If off while `.gitmodules` has entries, setup warns once naming
   `agentic.worktree.traits.submodules` and records `skipped: "trait-off"`;
@@ -817,16 +817,33 @@ Configure `workbench.worktree` (or `agentic.worktree`):
   for example `[".env.*" "config/*.local"]`. Matching files retain their relative
   paths, with parent directories created as needed; existing destinations are
   skipped and patterns with no match are ignored.
-- `setupHooks` and `teardownHooks`: ordered lists of shell command strings.
-  Each runs in a separate strict Bash process with the worktree as cwd; changes
-  to environment or cwd do not carry into the next hook. Reference packages
-  through their store paths for reproducible dependencies. Hook names in
-  diagnostics are zero-based, for example `setupHooks[0]`. Setup hooks run
-  after the built-in preparation and must exit zero. Every teardown hook must
-  exit zero **and** print a stdout line beginning `verified:`; any stdout
-  containing `skipped` (case-insensitive) fails, even alongside a verification
-  line. Hooks must verify actual resource absence, not merely command dispatch.
-  A failure stops the runner; no declared teardown hooks succeeds with a note.
+- `setupHooks` and `teardownHooks`: ordered lists of shell command strings or
+  `{ name; run; required ? true; needs ? []; }` attrsets. Each runs in a separate
+  strict Bash process with the worktree as cwd; changes to environment or cwd
+  do not carry into the next hook. Reference packages through their store paths
+  for reproducible dependencies. Names must be non-empty `[A-Za-z0-9_-]` tokens,
+  unique within each list; duplicate names fail evaluation naming both entries.
+  Named steps use `setupHooks[<name>]`; strings keep zero-based names such as
+  `setupHooks[0]` and remain required, unchanged. Setup hooks run after built-in
+  preparation. A required failure stops setup; a non-required failure records
+  `outcome: "failed"`, `required: false`, degrades setup and runs later hooks.
+- `services`: an attribute set of service declarations (default `{}`), declared
+  in step 5; not yet acted on. A hook's `needs` must name keys in this set;
+  unknown names fail evaluation naming the hook and service. Named setup step
+  entries record `needs`, including `[]`. No services are started or checked.
+  For example, `services.database = {};` allows
+  `setupHooks = [{ name = "probe"; run = "exit 1"; required = false; needs = ["database"]; }];`
+  to finish with a degraded record.
+
+Required teardown hooks (including all plain strings) must exit zero **and**
+print a stdout line beginning `verified:`; any stdout containing `skipped`
+(case-insensitive) fails, even alongside a verification line. They must verify
+actual resource absence, not merely command dispatch. A required failure stops
+teardown and vetoes removal. Non-required teardown hooks need no `verified:`
+line and may print `skipped`; a nonzero exit is reported but does not stop later
+hooks or veto removal. Use `required = false` only for cleanup that is safe to
+leave unverified. Teardown `needs` is validated but not acted on. No declared
+teardown hooks succeeds with a note; the runner itself never removes a worktree.
 
 `agentic.worktreeLib.{setupScript,hooksScript,teardownScript,workerStartScript,removeScript} pkgs` exposes the
 same runners and the Git-hook isolation helper. These are the supported APIs;
@@ -845,7 +862,8 @@ Setup atomically writes `workbench-setup.json` inside the target's own
 `git rev-parse --absolute-git-dir`, including on failure after Git discovery.
 Record v2 contains `schema: "workbench.worktree-setup/2"` and ordered
 `steps`: each has `name`, `applies`, `outcome` (`ok|failed|blocked|not-applicable`),
-`required`, and optional `reason`, `exitCode`, `message`. Overall `status`
+`required`, and optional `reason`, `exitCode`, `message`, `needs` (named hooks).
+Overall `status`
 is `ok|degraded|failed|blocked`: degraded means only non-required steps failed.
 BPH-66: discovery, the devShell probe, or warm-up emits `blocked` when stderr
 contains `unsupported extension name extensions.relativeworktrees`

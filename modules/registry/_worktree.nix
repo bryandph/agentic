@@ -6,6 +6,55 @@
   ...
 }: let
   cfg = config.agentic.worktree;
+  hookType = lib.types.either lib.types.str (lib.types.submodule {
+    options = {
+      name = lib.mkOption {
+        type = lib.types.strMatching "[A-Za-z0-9_-]+";
+        description = "Unique hook name within this phase.";
+      };
+      run = lib.mkOption {
+        type = lib.types.str;
+        description = "Command run in its own strict Bash process.";
+      };
+      required = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Whether failure stops setup or vetoes removal.";
+      };
+      needs = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "Declared service dependencies; recorded but not yet acted on.";
+      };
+    };
+  });
+  validateHooks = phase: hooks: let
+    named = lib.imap0 (index: value: {inherit index value;}) hooks;
+    errors = lib.concatMap (entry:
+      lib.optionals (builtins.isAttrs entry.value) (
+        (lib.concatMap (other:
+          lib.optional (builtins.isAttrs other.value && other.index < entry.index && other.value.name == entry.value.name)
+          "${phase}[${toString other.index}] and ${phase}[${toString entry.index}] duplicate hook name '${entry.value.name}'")
+        named)
+        ++ (lib.concatMap (service:
+          lib.optional (!(builtins.hasAttr service cfg.services))
+          "${phase}[${entry.value.name}] needs unknown service '${service}'")
+        entry.value.needs)
+      ))
+    named;
+  in
+    if errors == []
+    then hooks
+    else throw (lib.concatStringsSep "; " errors);
+  normalizeHook = index: value:
+    if builtins.isString value
+    then {
+      name = toString (index - 1);
+      run = value;
+      required = true;
+      needs = null;
+    }
+    else value;
   hook = pkgs: phase: index: command:
     pkgs.writeShellApplication {
       name = "workbench-worktree-${phase}-hook-${toString index}";
@@ -88,7 +137,7 @@
         git_dir="$(GIT_WORK_TREE="$PWD" git -c submodule.recurse=false rev-parse --absolute-git-dir)"
         started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         step="" steps='[]' degraded=false first_failure=""
-        step_required=true blocker=null
+        step_required=true step_needs=null blocker=null
         block_relative_worktrees() {
           local stderr="$1" code="$2" detail nix_version
           if ! grep -qiF 'unsupported extension name extensions.relativeworktrees' <<< "$stderr"; then return 0; fi
@@ -104,8 +153,9 @@
         end_step() {
           local outcome="$1" code="$2" applies="$3" reason="$4" message="''${5:-}"
           steps="$(jq -c --arg name "$step" --arg outcome "$outcome" --argjson code "$code" \
-            --argjson required "$step_required" --argjson applies "$applies" --arg reason "$reason" --arg message "$message" \
+            --argjson required "$step_required" --argjson needs "$step_needs" --argjson applies "$applies" --arg reason "$reason" --arg message "$message" \
             '. + [{name: $name, applies: $applies, outcome: $outcome, required: $required}
+              + (if $needs == null then {} else {needs: $needs} end)
               + (if $code == null then {} else {exitCode: $code} end)
               + (if $reason == "" then {} else {reason: $reason} end)
               + (if $message == "" then {} else {message: $message} end)]' <<< "$steps")"
@@ -117,7 +167,7 @@
         }
         begin_step() {
           if [ -n "$step" ]; then end_step ok 0 true ""; fi
-          step="$1" step_required=true
+          step="$1" step_required=true step_needs=null
         }
         shell_kind=${lib.escapeShellArg cfg.shell.kind}
         shell_attr=${lib.escapeShellArg cfg.shell.attr}
@@ -406,9 +456,19 @@
           warm_result=ok
           end_step ok 0 true ""
         fi
-        ${lib.concatImapStringsSep "\n" (i: command: ''
-            begin_step 'setupHooks[${toString (i - 1)}]'
-            ${lib.getExe (hook pkgs "setup" i command)}
+        ${lib.concatImapStringsSep "\n" (i: value: let
+            h = normalizeHook i value;
+          in ''
+            begin_step 'setupHooks[${h.name}]'
+            step_required=${lib.boolToString h.required}
+            step_needs=${lib.escapeShellArg (builtins.toJSON h.needs)}
+            hook_status=0
+            ${lib.getExe (hook pkgs "setup" i h.run)} || hook_status=$?
+            if [ "$hook_status" != 0 ]; then
+              if "$step_required"; then exit "$hook_status"; fi
+              echo "worktree $worktree: $step failed: exit $hook_status; continuing (not required)" >&2
+              end_step failed "$hook_status" true ""
+            fi
           '')
           cfg.setupHooks}
       '';
@@ -440,20 +500,25 @@
             echo "worktree $worktree: no teardown hooks declared; nothing to verify"
           ''
           else
-            lib.concatImapStringsSep "\n" (i: command: ''
+            lib.concatImapStringsSep "\n" (i: value: let
+              h = normalizeHook i value;
+            in ''
               output="$(mktemp)"
               trap 'rm -f "$output"' EXIT
               hook_status=0
-              ${lib.getExe (hook pkgs "teardown" i command)} >"$output" || hook_status=$?
+              ${lib.getExe (hook pkgs "teardown" i h.run)} >"$output" || hook_status=$?
               cat "$output"
               reason=""
               if [ "$hook_status" != 0 ]; then reason="exit $hook_status"
-              elif grep -qi 'skipped' "$output"; then reason='reported skipped cleanup'
-              elif ! grep -q '^verified:' "$output"; then reason='missing verified: line on stdout'
+              elif ${lib.boolToString h.required} && grep -qi 'skipped' "$output"; then reason='reported skipped cleanup'
+              elif ${lib.boolToString h.required} && ! grep -q '^verified:' "$output"; then reason='missing verified: line on stdout'
               fi
               if [ -n "$reason" ]; then
-                echo "worktree $worktree: teardownHooks[${toString (i - 1)}] failed: $reason; do not remove the worktree" >&2
-                exit 1
+                if ${lib.boolToString h.required}; then
+                  echo "worktree $worktree: teardownHooks[${h.name}] failed: $reason; do not remove the worktree" >&2
+                  exit 1
+                fi
+                echo "worktree $worktree: teardownHooks[${h.name}] failed: $reason; continuing (not required)" >&2
               fi
               rm -f "$output"
               trap - EXIT
@@ -514,15 +579,22 @@ in {
       default = [".envrc" ".claude"];
       description = "Paths or shell glob patterns copied from the main worktree when absent. Unmatched patterns are ignored; relative paths are preserved with parent directories created.";
     };
+    services = lib.mkOption {
+      type = lib.types.attrsOf lib.types.anything;
+      default = {};
+      description = "Services declared in step 5; not yet acted on. Hook needs must reference these names.";
+    };
     setupHooks = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
+      type = lib.types.listOf hookType;
       default = [];
-      description = "Ordered shell commands run in the worktree after setup. Each runs in its own strict Bash process; use store paths for dependencies. Failures are named setupHooks[zero-based-index].";
+      apply = validateHooks "setupHooks";
+      description = "Ordered strings or { name; run; required ? true; needs ? []; } hooks run after setup in separate strict Bash processes. Names are unique tokens; plain strings keep zero-based index names and are required. Non-required failures degrade setup and allow later hooks to run. Needs are validated and recorded, not started; use store paths for dependencies.";
     };
     teardownHooks = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
+      type = lib.types.listOf hookType;
       default = [];
-      description = "Ordered shell commands run in the worktree before coordinator removal. Each must exit zero and print a verified: stdout line, without skipped. No removal is performed.";
+      apply = validateHooks "teardownHooks";
+      description = "Ordered strings or { name; run; required ? true; needs ? []; } hooks run before coordinator removal. Required hooks (including strings) must exit zero and print a verified: stdout line, without skipped; failure vetoes removal. Non-required hooks need no verification line; nonzero exits are reported but do not veto removal. Needs are only validated; no services or removal are performed.";
     };
   };
   options.agentic.worktreeLib = lib.mkOption {
