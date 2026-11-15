@@ -131,7 +131,7 @@
     '';
   in ''
     # Best effort, offline BM25 refresh; bound startup even if qmd hangs.
-    if ! ${pkgs.coreutils}/bin/timeout --kill-after=1s 10s ${refresh} </dev/null >/dev/null 2>&1; then
+    if ! ${pkgs.coreutils}/bin/timeout --kill-after=1s ${toString cfg.refreshTimeout}s ${refresh} </dev/null >/dev/null 2>&1; then
       printf '%s\n' 'agentic: qmd index refresh skipped or failed (update hook, error, or timeout).' >&2
     fi
   '';
@@ -146,6 +146,12 @@ in {
         repository root (git-ignore it) and registers collections there,
         so searches from inside the repository see only its own scope.
       '';
+    };
+
+    refreshTimeout = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 10;
+      description = "Timeout in seconds for the best-effort shell-entry qmd text index refresh.";
     };
 
     collections = lib.mkOption {
