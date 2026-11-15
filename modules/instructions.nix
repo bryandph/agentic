@@ -32,7 +32,7 @@
     header = fragments: ''
       <!-- GENERATED FILE — DO NOT EDIT.
            Rendered from agentic.knowledge fragments: ${lib.concatStringsSep ", " fragments}.
-           Durable additions belong in fragments (or serena memories) — never here.
+           Durable additions belong in fragments (or the repository's OKF bundle) — never here.
            Regenerate: nix run .#write-agent-instructions -->
     '';
 

@@ -53,13 +53,13 @@ Exploring, Planning, Approved, Implementing, Verifying, Review, Done.
 
 - Small changes need only the task: description, acceptance criteria and
   plan replace a separate proposal and task list.
-- Behaviour contracts that outlive a single task are `type: Spec`
-  concepts in the OKF bundle; durable rules and design choices are
-  `type: Decision` concepts. Do not use Backlog.md docs or decisions for
-  them.
-- A task links the concepts it relies on or changes with `--ref` (bundle
-  path). A task that changes a contract updates the Spec concept in the
-  same pull request, as `status: draft` until the operator verifies it.
+- Behaviour contracts that outlive a single task are OpenSpec specs
+  (`openspec/specs/`, with changes under `openspec/changes/`). Durable
+  decisions stay `type: Decision` concepts in the OKF bundle. Do not use
+  Backlog.md docs or decisions for them.
+- A task links the spec or change it relies on or changes with `--ref`
+  (spec or change path). A task that changes a contract updates the
+  OpenSpec spec or change in the same pull request.
 
 ## Who writes the backlog
 

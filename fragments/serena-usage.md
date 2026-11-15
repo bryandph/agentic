@@ -1,5 +1,7 @@
-Serena is the project's **memory holder** — plain markdown under
-`.serena/memories/`, MCP-served to every harness.
+Serena provides code navigation and **read-only reference memories** —
+plain markdown under `.serena/memories/`, MCP-served to every harness.
+Agents do not call `write_memory`, `edit_memory`, `delete_memory` or
+`rename_memory`.
 
 - Activate the project before any other serena call; then list
   memories and read the ones relevant to your task — `feedback/*` and
@@ -10,20 +12,20 @@ Serena is the project's **memory holder** — plain markdown under
   After activation, discover/list the memory and symbolic tools through
   `mcp({server: "serena"})`. If metadata is absent, first connect with
   `mcp({connect: "serena"})`; connection is not a Serena tool call.
-- Write what cannot be derived: decisions + rationale, gotchas, findings
-  with evidence. Store **pointers, not snapshots** via `write_memory`:
-  link `mem:` refs, file paths or AGENTS.md sections. Never snapshot
-  AGENTS.md, command lists, generated knowledge or repo overviews into
-  memories — those copies drift; point to the source instead.
-- TODOs belong in the issue tracker, active designs in the spec system,
-  session narratives nowhere — a memory is for what a stranger needs a
-  year from now.
+- New durable repo knowledge — decisions and rationale, gotchas,
+  procedures and findings with evidence — belongs in the repository's
+  OKF bundle by pull request (see the memory skill). Keep **pointers,
+  not snapshots**: link sources rather than copying AGENTS.md, command
+  lists, generated knowledge or repo overviews. Cross-project guidance
+  belongs in the organisation's maintained articles.
+- TODOs belong in the issue tracker, behaviour contracts in OpenSpec,
+  session narratives nowhere. Bundle concepts link to specifications
+  rather than restating them.
 - The `knowledge/` namespace is **generated and read-only** (rendered
-  from the declared fragment registry) — never write there; your
-  writable namespaces are other subdirectories. Move root memories with
-  `rename_memory` so `mem:` references stay valid. Cross-reference memories
-  with `mem:`-prefixed links; `serena memories check` gates reference
-  integrity in CI.
+  from the declared fragment registry). Existing memories outside it
+  are read-only reference material; leave them untouched. Follow
+  `mem:`-prefixed links when reading memories; `serena memories check`
+  gates reference integrity in CI.
 - Retrieval: names/grep first; use a knowledge-search tool, when the
   environment provides one, for concept-level recall over the corpus.
 - Prefer symbolic tools (`get_symbols_overview`, `find_symbol`) over

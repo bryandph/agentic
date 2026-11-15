@@ -51,7 +51,7 @@ in section 8 and BPH-24. Earlier rename/publication tasks remain separate.
 
 - [ ] 7.1 Run `openspec validate standardize-project-workbench` and verify every delta capability has an implementation/acceptance check.
 - [ ] 7.2 Git-add all new files, run `nix run --impure .#fmt`, `nix run --impure .#check`, `nix flake check --impure`, and targeted builds of the Workbench artifacts plus at least one NixOS and one Darwin configuration that consume the environment.
-- [ ] 7.3 Update human documentation and durable Serena decision pointers for the Workbench placement/compatibility contract, summarize pushed revisions and remaining consumer issues in the authoritative work item, and leave alias removal for a later explicit breaking issue/change.
+- [ ] 7.3 Update human documentation and OKF bundle decision concepts for the Workbench placement/compatibility contract, summarize pushed revisions and remaining consumer issues in the authoritative work item, and leave alias removal for a later explicit breaking issue/change.
 
 ## 8. Flake shell composition and scoped delivery (BPH-24)
 

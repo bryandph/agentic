@@ -29,16 +29,19 @@ their own, merged by the module system.
 Declared knowledge SHALL render into per-repo serena memories (core and
 env fragments plus their deep-source documents), placed under a
 generated namespace and marked immutable via serena's
-`read_only_memory_patterns`; agent-written memories live in a separate
-writable namespace and are never touched by generation. The serena
-project configuration (`.serena/project.yml` — languages, read-only and
-ignored memory patterns) SHALL be generated from module options. Memory
+`read_only_memory_patterns`. Pre-existing memories outside the generated
+namespace SHALL be preserved untouched by generation and are read-only
+reference material. The serena project configuration (`.serena/project.yml`
+— languages, read-only and ignored memory patterns) SHALL be generated
+from module options. Memory
 reference integrity (`serena memories check`) SHALL run in repo CI.
 Consumers MAY enable a namespace policy (default off) that SHALL reject
 root-level Markdown memories except allowlisted names, without changing
 namespaced memories or generated content. Flake consumers SHALL receive a
 check and enabled shells SHALL receive an equivalent CLI. Core Serena
-memory guidance SHALL teach pointers to sources, not drifting snapshots.
+memory guidance SHALL direct new durable knowledge to the repository's
+OKF bundle via pull request and SHALL NOT instruct agents to write Serena
+memories. It SHALL teach pointers to sources, not drifting snapshots.
 Retrieval SHALL be available beyond name-based listing: a semantic search
 tool over the committed markdown, whose index is disposable and lives
 outside the repo, exposed via MCP AND as a plain CLI (harnesses without
@@ -50,11 +53,11 @@ core MCP support, e.g. Pi, retain access).
 - **THEN** the referenced memory exists in that repo's memory plane,
   read-only, after generation
 
-#### Scenario: agent memories survive regeneration
-- **WHEN** an agent has written memories in the writable namespace and
-  knowledge generation re-runs
-- **THEN** the agent-written memories are unchanged and only the
-  generated namespace is updated
+#### Scenario: existing memories survive regeneration
+- **WHEN** pre-existing memories exist outside the generated namespace
+  and knowledge generation re-runs
+- **THEN** those existing read-only reference memories are unchanged and
+  only the generated namespace is updated
 
 #### Scenario: namespace policy is opt-in
 - **WHEN** a consumer leaves `agentic.memoryPlane.namespaces.require` false
@@ -81,9 +84,12 @@ core MCP support, e.g. Pi, retain access).
 
 #### Scenario: memory guidance avoids snapshots
 - **WHEN** an agent reads the core Serena usage fragment
-- **THEN** it is told to record non-derivable decisions, gotchas and findings
-  with evidence, pointing to sources rather than snapshotting AGENTS.md,
-  command lists, generated knowledge or repository overviews
+- **THEN** it is directed to record new durable decisions, gotchas and
+  findings with evidence in the repository's OKF bundle via pull request,
+  pointing to sources rather than snapshotting AGENTS.md, command lists,
+  generated knowledge or repository overviews
+- **AND** it is told to treat Serena memories as read-only reference and
+  not to write Serena memories
 
 #### Scenario: semantic search reaches every harness
 - **WHEN** an agent needs a concept-level query over the repo's knowledge

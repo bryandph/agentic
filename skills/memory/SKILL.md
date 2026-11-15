@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Search, propose and curate this repository's knowledge bundle (Open Knowledge Format) - specs, decisions and memory. Use before designing or answering why something is the way it is, when a change touches a contract, and when a session learns something a later session should know.
+description: Search, propose and curate this repository's knowledge bundle (Open Knowledge Format) - decisions, architecture, conventions, gotchas, references and playbooks. Use before designing or answering why something is the way it is, when a change touches a contract, and when a session learns something a later session should know.
 ---
 
 # Memory
@@ -8,10 +8,9 @@ description: Search, propose and curate this repository's knowledge bundle (Open
 This repository's knowledge is an [Open Knowledge Format 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md)
 bundle in the folder set by `agentic.bundle.root` (usually `.okf/`),
 committed with the code. It holds durable knowledge about the
-repository: behaviour contracts (`specs/`, `type: Spec`), decisions
-(`type: Decision`), how it works, why it is that way, gotchas and
-conventions. Work and its status belong in the backlog (see the
-work-tracking skill), never in the bundle.
+repository: decisions (`type: Decision`), how it works, why it is that
+way, gotchas, conventions, references and playbooks. Work and its status
+belong in the backlog (see the work-tracking skill), never in the bundle.
 
 ## Search before you design
 
@@ -40,7 +39,7 @@ sources:
 Why, in a few sentences, with the evidence linked through `sources`.[^pr-42]
 ```
 
-- `type` is required. Use short, descriptive kinds: `Spec`, `Decision`,
+- `type` is required. Use short, descriptive kinds: `Decision`,
   `Architecture`, `Convention`, `Gotcha`, `Reference`, `Playbook`.
 - `generated.by` names who wrote it: `<agent>/<model>` for an agent,
   `human:<name>` for a person. `generated.at` is the last meaningful
@@ -54,21 +53,22 @@ Why, in a few sentences, with the evidence linked through `sources`.[^pr-42]
 - Keep `index.md` in each folder listing its concepts with their
   descriptions. Do not keep a `log.md`: git is the history.
 
-## Specs
+## Behaviour contracts
 
-A `type: Spec` concept states what the system must do, as requirements
-with scenarios a reviewer can check, and why. One concept per capability
-under `specs/`. A change to a contract edits the concept in the pull
-request that implements it; git history is the change record.
+Behaviour contracts live in OpenSpec: `openspec/specs/`, with changes
+under `openspec/changes/`. Bundle concepts link to the relevant spec
+instead of restating it.
 
 ## Who writes memory
 
 - Workers do not write memory. They return learnings with their result.
-- The repository's coordinating agent decides what is worth keeping and
-  commits it, as `draft` for anything not yet confirmed.
-- The operator reviews drafts; reviewed concepts become `stable` with a
-  `human:` verification. Specs and decisions are agent drafts until the
-  operator verifies them.
+- The repository's coordinating agent decides what is worth keeping,
+  writes concepts on a branch and opens a pull request for review, using
+  `draft` for anything not yet confirmed. Never commit directly to the
+  default branch.
+- The operator's review and merge is the promotion. Reviewed concepts
+  become `stable` with a `human:` verification; decisions remain agent
+  drafts until the operator verifies them.
 - Agents never add or change a `human:` entry in `generated` or
   `verified`. Pull request review checks this; there is no automated
   check.
