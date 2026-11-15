@@ -830,13 +830,9 @@ Configure `workbench.worktree` (or `agentic.worktree`):
   `setupHooks[0]` and remain required, unchanged. Setup hooks run after built-in
   preparation. A required failure stops setup; a non-required failure records
   `outcome: "failed"`, `required: false`, degrades setup and runs later hooks.
-- `services`: an attribute set of service declarations (default `{}`), declared
-  in step 5; not yet acted on. A hook's `needs` must name keys in this set;
-  unknown names fail evaluation naming the hook and service. Named setup step
-  entries record `needs`, including `[]`. No services are started or checked.
-  For example, `services.database = {};` allows
-  `setupHooks = [{ name = "probe"; run = "exit 1"; required = false; needs = ["database"]; }];`
-  to finish with a degraded record.
+- `services`: typed repository-shared service declarations (default `{}`). A
+  hook's `needs` must name keys in this set; unknown names fail evaluation.
+  See shared services below. Named setup steps record `needs`, including `[]`.
 
 Required teardown hooks (including all plain strings) must exit zero **and**
 print a stdout line beginning `verified:`; any stdout containing `skipped`
@@ -845,10 +841,12 @@ actual resource absence, not merely command dispatch. A required failure stops
 teardown and vetoes removal. Non-required teardown hooks need no `verified:`
 line and may print `skipped`; a nonzero exit is reported but does not stop later
 hooks or veto removal. Use `required = false` only for cleanup that is safe to
-leave unverified. Teardown `needs` is validated but not acted on. No declared
-teardown hooks succeeds with a note; the runner itself never removes a worktree.
+leave unverified. Teardown `needs` supplies connection env without starting
+services. After successful verification, teardown detaches the worktree from
+all its repository service leases. No declared teardown hooks succeeds with a
+note and still detaches; the runner itself never removes a worktree.
 
-`agentic.worktreeLib.{setupScript,hooksScript,teardownScript,workerStartScript,removeScript} pkgs` exposes the
+`agentic.worktreeLib.{setupScript,hooksScript,teardownScript,workerStartScript,removeScript,servicesScript} pkgs` exposes the
 same runners and the Git-hook isolation helper. These are the supported APIs;
 legacy creator-specific traits and copy options warn and redirect to them.
 Legacy generation-only settings are ignored with warnings; delete them on a pin
@@ -856,8 +854,70 @@ bump. They no longer generate artifacts or affect coordinator behavior.
 `agentic-worktree-setup` remains an executable alias. The Claude
 `WorktreeCreate` hook and coordinator-created Herdr worktrees use the same
 canonical setup command. No creator configuration is generated or installed.
-The contributor shell also supplies all four runners from this repository's own
+The contributor and consumer devenv shells supply these runners from their own
 registry configuration.
+
+#### Shared services
+
+Declare services in the repository's Nix module, never in a worktree-local file:
+
+```nix
+workbench.worktree = {
+  services.database = {
+    probe.tcp = "127.0.0.1:5432"; # alternatively: probe.run = "pg_isready";
+    process = "postgres"; # default: service name; runs devenv up postgres
+    # start = "custom-command"; # optional override instead of devenv up
+    autostart = true; # false: attach-only
+    startTimeout = 60; # seconds
+    env.PGHOST = "127.0.0.1";
+  };
+  setupHooks = [{ name = "migrate"; run = "run-migrations"; needs = ["database"]; }];
+};
+```
+
+A probe requires exactly one `tcp` host:port or `run` command (exit zero means
+up). All services are shared by the repository: no per-worktree ports or scope.
+Before the first setup hook needing each service, setup records a
+`services[<name>]` step and probes from the main checkout. If already up, it
+attaches without starting anything. Without a lease, ownership is `external`;
+external services can never be stopped by workbench.
+
+If down and autostart is enabled, setup finds the existing Herdr workspace whose
+`worktree.checkout_path` is the main checkout, creates a `services:<name>` tab
+there, and runs `start` or `devenv up <process>` in that checkout. It never
+creates a workspace implicitly. No matching workspace produces the typed
+`environment` blocker `service-workspace-missing`. Attach-only with a failed
+probe produces `service-unavailable` with `startAttempted: false`. Failed
+starts produce `service-unavailable` with `startAttempted: true`, probe,
+bounded detail and remediation. Setup polls every second up to `startTimeout`,
+leaves failed tabs for inspection, and marks their lease `state: "start-failed"`.
+Blockers stop setup with status `blocked`, exit 6, even for optional hooks.
+An existing lease with a failed probe is preserved rather than overwritten;
+inspect it, detach its worktrees and stop it explicitly before retrying.
+
+Leases are atomically written under
+`$XDG_STATE_HOME/workbench/services/<repo-key>/<service>.json` (state defaults to
+`~/.local/state`). The repo key hashes the canonical main-checkout path. A lease
+records service, owner (`COTAL_NAME`, otherwise `user:<login>`), startedFor,
+workspace, tab, pane, command, startedAt and attached worktrees. A repository lock
+serializes start, attach, detach and stop. Attaching to an owned service adds the
+worktree once. Setup step entries include `attach`, `owner` and optional lease
+path; the record's `services.<name>.env` contains connection values for workers.
+Every hook needing a service receives its env. **Never put credentials in env**:
+these values are public Nix store data and recorded in setup results.
+
+`workbench-services [--worktree <path>] status [<name>]` prints leases and live
+probes as JSON, including `paneExists` for each lease (true/false for a live or
+missing Herdr pane, null when Herdr cannot establish its state). Existing-lease
+blockers name the lease, owner, tab/pane and exact status, detach and stop commands.
+`workbench-services [--worktree <path>] stop <name>` refuses
+external services, nonempty attached lists, or an owner mismatch. An explicit
+`--as-owner <owner>` acknowledges acting for the recorded owner. A permitted stop
+closes only the recorded Herdr tab, then deletes the lease. If that tab no longer
+exists, stop removes the stale lease with a note; other Herdr failures retain it.
+Teardown and verified
+remove only detach; nothing is ever stopped automatically, including failed
+starts. After removing the last worktree, run stop from the main checkout.
 
 #### Setup result and check codes
 

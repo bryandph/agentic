@@ -24,7 +24,7 @@
       needs = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [];
-        description = "Declared service dependencies; recorded but not yet acted on.";
+        description = "Shared service dependencies; connection env is exported to this hook.";
       };
     };
   });
@@ -74,6 +74,24 @@
   '';
 
   hooksScript = import ../_git-hooks/isolate.nix;
+  servicesScript = pkgs:
+    pkgs.writeShellApplication {
+      name = "workbench-services";
+      runtimeInputs = [pkgs.python3 pkgs.git pkgs.bash];
+      text = ''
+        export WORKBENCH_SERVICES_CONFIG=${pkgs.writeText "workbench-services.json" (builtins.toJSON cfg.services)}
+        exec python3 ${./_worktree-services.py} "$@"
+      '';
+    };
+  hookEnv = h:
+    lib.concatMapStringsSep " " (
+      name:
+        lib.concatStringsSep " " (lib.mapAttrsToList (key: value: lib.escapeShellArg "${key}=${value}") cfg.services.${name}.env)
+    ) (
+      if h.needs == null
+      then []
+      else h.needs
+    );
 
   setupScript = pkgs:
     (pkgs.writeShellApplication {
@@ -138,6 +156,9 @@
         started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         step="" steps='[]' degraded=false first_failure=""
         step_required=true step_needs=null blocker=null
+        # Some configurations declare no dependent hooks.
+        # shellcheck disable=SC2034
+        service_results='{}' service_env='{}' step_extra='{}'
         block_relative_worktrees() {
           local stderr="$1" code="$2" detail nix_version
           if ! grep -qiF 'unsupported extension name extensions.relativeworktrees' <<< "$stderr"; then return 0; fi
@@ -153,12 +174,12 @@
         end_step() {
           local outcome="$1" code="$2" applies="$3" reason="$4" message="''${5:-}"
           steps="$(jq -c --arg name "$step" --arg outcome "$outcome" --argjson code "$code" \
-            --argjson required "$step_required" --argjson needs "$step_needs" --argjson applies "$applies" --arg reason "$reason" --arg message "$message" \
+            --argjson extra "$step_extra" --argjson required "$step_required" --argjson needs "$step_needs" --argjson applies "$applies" --arg reason "$reason" --arg message "$message" \
             '. + [{name: $name, applies: $applies, outcome: $outcome, required: $required}
               + (if $needs == null then {} else {needs: $needs} end)
               + (if $code == null then {} else {exitCode: $code} end)
               + (if $reason == "" then {} else {reason: $reason} end)
-              + (if $message == "" then {} else {message: $message} end)]' <<< "$steps")"
+              + (if $message == "" then {} else {message: $message} end) + $extra]' <<< "$steps")"
           if [ "$outcome" = failed ]; then
             if [ -z "$first_failure" ]; then first_failure="$step"; fi
             if ! "$step_required"; then degraded=true; fi
@@ -167,7 +188,7 @@
         }
         begin_step() {
           if [ -n "$step" ]; then end_step ok 0 true ""; fi
-          step="$1" step_required=true step_needs=null
+          step="$1" step_required=true step_needs=null step_extra='{}'
         }
         shell_kind=${lib.escapeShellArg cfg.shell.kind}
         shell_attr=${lib.escapeShellArg cfg.shell.attr}
@@ -196,12 +217,12 @@
           fi
           record_tmp="$(mktemp "$git_dir/workbench-setup.json.XXXXXX")"
           jq -n --arg status "$status" --arg step "$failed_step" --argjson steps "$steps" --argjson blocker "$blocker" \
-            --arg warm "$warm_result" --argjson warmCode "$warm_status" \
+            --argjson services "$service_env" --arg warm "$warm_result" --argjson warmCode "$warm_status" \
             --arg start "$started_at" --arg finish "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg command "$setup_command" --arg staleSocket "$stale_socket_removed" \
             --argjson configured "$submodules_configured" --argjson initialized "$submodules_initialized" \
             --argjson excluded "$submodules_excluded" --argjson skipped "$submodules_skipped" \
-            '{schema: "workbench.worktree-setup/2", steps: $steps, submodules: {configured: $configured, initialized: $initialized, excluded: $excluded, skipped: $skipped}, fsmonitor: {staleSocketRemoved: (if $staleSocket == "" then null else $staleSocket end)}, status: $status, failedStep: (if $step == "" then null else $step end), warmUp: {status: $warm, exitCode: $warmCode}, startedAt: $start, finishedAt: $finish, setupCommand: $command} + (if $blocker == null then {} else {blocker: $blocker} end)' > "$record_tmp"
+            '{schema: "workbench.worktree-setup/2", services: $services, steps: $steps, submodules: {configured: $configured, initialized: $initialized, excluded: $excluded, skipped: $skipped}, fsmonitor: {staleSocketRemoved: (if $staleSocket == "" then null else $staleSocket end)}, status: $status, failedStep: (if $step == "" then null else $step end), warmUp: {status: $warm, exitCode: $warmCode}, startedAt: $start, finishedAt: $finish, setupCommand: $command} + (if $blocker == null then {} else {blocker: $blocker} end)' > "$record_tmp"
           mv -f "$record_tmp" "$git_dir/workbench-setup.json"
           if [ "$result" != 0 ] && [ "$failed_step" != submodule-stub ]; then echo "worktree $worktree: setup $status at $failed_step; see $git_dir/workbench-setup.json" >&2; fi
           exit "$result"
@@ -459,11 +480,32 @@
         ${lib.concatImapStringsSep "\n" (i: value: let
             h = normalizeHook i value;
           in ''
+            ${lib.concatMapStringsSep "\n" (name: ''
+                if ! jq -e --arg name ${lib.escapeShellArg name} 'has($name)' <<< "$service_results" >/dev/null; then
+                  begin_step ${lib.escapeShellArg "services[${name}]"}
+                  service_result="$(
+                    ${servicesScript pkgs}/bin/workbench-services --worktree "$worktree" ensure ${lib.escapeShellArg name}
+                  )"
+                  step_extra="$(jq -c 'del(.blocker)' <<< "$service_result")"
+                  service_results="$(jq -c --arg name ${lib.escapeShellArg name} --argjson value "$service_result" '. + {($name): $value}' <<< "$service_results")"
+                  service_env="$(jq -c --arg name ${lib.escapeShellArg name} --argjson env ${lib.escapeShellArg (builtins.toJSON cfg.services.${name}.env)} '. + {($name): {env: $env}}' <<< "$service_env")"
+                  if jq -e '.blocker != null' <<< "$service_result" >/dev/null; then
+                    blocker="$(jq -c .blocker <<< "$service_result")"
+                    end_step blocked 6 true ""
+                    exit 6
+                  fi
+                  end_step ok 0 true ""
+                fi
+              '') (
+                if h.needs == null
+                then []
+                else h.needs
+              )}
             begin_step 'setupHooks[${h.name}]'
             step_required=${lib.boolToString h.required}
             step_needs=${lib.escapeShellArg (builtins.toJSON h.needs)}
             hook_status=0
-            ${lib.getExe (hook pkgs "setup" i h.run)} || hook_status=$?
+            env ${hookEnv h} ${lib.getExe (hook pkgs "setup" i h.run)} || hook_status=$?
             if [ "$hook_status" != 0 ]; then
               if "$step_required"; then exit "$hook_status"; fi
               echo "worktree $worktree: $step failed: exit $hook_status; continuing (not required)" >&2
@@ -506,7 +548,7 @@
               output="$(mktemp)"
               trap 'rm -f "$output"' EXIT
               hook_status=0
-              ${lib.getExe (hook pkgs "teardown" i h.run)} >"$output" || hook_status=$?
+              env ${hookEnv h} ${lib.getExe (hook pkgs "teardown" i h.run)} >"$output" || hook_status=$?
               cat "$output"
               reason=""
               if [ "$hook_status" != 0 ]; then reason="exit $hook_status"
@@ -525,6 +567,7 @@
             '')
             cfg.teardownHooks
         }
+        ${servicesScript pkgs}/bin/workbench-services --worktree "$worktree" detach
       '';
     };
   removeScript = pkgs:
@@ -580,21 +623,68 @@ in {
       description = "Paths or shell glob patterns copied from the main worktree when absent. Unmatched patterns are ignored; relative paths are preserved with parent directories created.";
     };
     services = lib.mkOption {
-      type = lib.types.attrsOf lib.types.anything;
+      type = lib.types.attrsOf (lib.types.submodule ({name, ...}: {
+        options = {
+          probe = lib.mkOption {
+            type = lib.types.submodule {
+              options = {
+                tcp = lib.mkOption {
+                  type = lib.types.nullOr lib.types.str;
+                  default = null;
+                };
+                run = lib.mkOption {
+                  type = lib.types.nullOr lib.types.str;
+                  default = null;
+                };
+              };
+            };
+            apply = p:
+              if (p.tcp != null) == (p.run != null)
+              then throw "service ${name}: probe requires exactly one of tcp or run"
+              else lib.filterAttrs (_: v: v != null) p;
+            description = "Exactly one TCP host:port or command (exit zero means up).";
+          };
+          process = lib.mkOption {
+            type = lib.types.str;
+            default = name;
+          };
+          start = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+          };
+          autostart = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+          };
+          startTimeout = lib.mkOption {
+            type = lib.types.ints.unsigned;
+            default = 60;
+          };
+          env = lib.mkOption {
+            type = lib.types.attrsOf lib.types.str;
+            default = {};
+            description = "Non-secret connection values exported to dependent hooks and recorded for workers. Never put credentials here.";
+          };
+        };
+      }));
+      apply = services:
+        if lib.all (name: builtins.match "[A-Za-z0-9_-]+" name != null) (builtins.attrNames services)
+        then services
+        else throw "Service names must be alphanumeric tokens with hyphens or underscores.";
       default = {};
-      description = "Services declared in step 5; not yet acted on. Hook needs must reference these names.";
+      description = "Repository-shared services. Probe first, attach or start in the main checkout Herdr workspace; never stopped automatically.";
     };
     setupHooks = lib.mkOption {
       type = lib.types.listOf hookType;
       default = [];
       apply = validateHooks "setupHooks";
-      description = "Ordered strings or { name; run; required ? true; needs ? []; } hooks run after setup in separate strict Bash processes. Names are unique tokens; plain strings keep zero-based index names and are required. Non-required failures degrade setup and allow later hooks to run. Needs are validated and recorded, not started; use store paths for dependencies.";
+      description = "Ordered strings or { name; run; required ? true; needs ? []; } hooks run after setup in separate strict Bash processes. Names are unique tokens; plain strings keep zero-based index names and are required. Non-required failures degrade setup and allow later hooks to run. Needs are validated, probed and started before the first dependent hook; use store paths for dependencies.";
     };
     teardownHooks = lib.mkOption {
       type = lib.types.listOf hookType;
       default = [];
       apply = validateHooks "teardownHooks";
-      description = "Ordered strings or { name; run; required ? true; needs ? []; } hooks run before coordinator removal. Required hooks (including strings) must exit zero and print a verified: stdout line, without skipped; failure vetoes removal. Non-required hooks need no verification line; nonzero exits are reported but do not veto removal. Needs are only validated; no services or removal are performed.";
+      description = "Ordered strings or { name; run; required ? true; needs ? []; } hooks run before coordinator removal. Required hooks (including strings) must exit zero and print a verified: stdout line, without skipped; failure vetoes removal. Non-required hooks need no verification line; nonzero exits are reported but do not veto removal. Needs supply connection env; teardown detaches leases only after verification and never stops services.";
     };
   };
   options.agentic.worktreeLib = lib.mkOption {
@@ -602,5 +692,5 @@ in {
     readOnly = true;
     description = "Creator-neutral setupScript pkgs, hooksScript pkgs (isolated Git hooks), teardownScript pkgs, workerStartScript pkgs, workerRecoverScript pkgs, and removeScript pkgs.";
   };
-  config.agentic.worktreeLib = {inherit setupScript hooksScript teardownScript workerStartScript workerRecoverScript removeScript;};
+  config.agentic.worktreeLib = {inherit setupScript hooksScript teardownScript workerStartScript workerRecoverScript removeScript servicesScript;};
 }

@@ -1,5 +1,6 @@
 """Offline real-Git fixtures; the only Herdr here is a PATH fake."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -101,6 +102,11 @@ def fixture(name, *, hook=good, agent="done", main=False, sub=False, dirty=None,
         cwd = case / "other"
         cwd.mkdir()
         git(cwd, "init", "-b", "main")
+    os.environ['XDG_STATE_HOME'] = str(case / 'service-state')
+    lease_dir = case / 'service-state/workbench/services' / hashlib.sha256(os.fsencode(repo.resolve())).hexdigest()
+    lease_dir.mkdir(parents=True)
+    lease_path = lease_dir / 'database.json'
+    lease_path.write_text(json.dumps({'service': 'database', 'attached': [str(path.resolve())], 'owner': 'fixture'}))
     args = [hook, "--workspace", "fixture"]
     if explicit:
         args += ["--worktree", str(path)]
@@ -127,6 +133,7 @@ def fixture(name, *, hook=good, agent="done", main=False, sub=False, dirty=None,
         expected.append(expected[0] + ["--force"])
     assert removals == expected, (name, calls, data)
     if success:
+        assert json.loads(lease_path.read_text())['attached'] == []
         assert not path.exists()
         assert git(repo, "branch", "--list", "worker") == "worker"
         assert data["teardown"]["verified"] == ["verified: resources absent"]
