@@ -116,7 +116,10 @@ strings) must exit zero and print a stdout line starting `verified:`, without
 printing `skipped` (case-insensitive). A required failure stops cleanup and
 vetoes removal. Non-required hooks need no verification line and may print
 `skipped`; nonzero exits are reported but neither stop later hooks nor veto
-removal. Mark cleanup non-required only when leaving it unverified is safe.
+removal. Every stdout line from a non-required hook is prefixed
+`optional[<name>]: ` and retained in the teardown record, but ignored for
+required verification and defensive `skipped` detection. Required output stays
+unprefixed. Mark cleanup non-required only when leaving it unverified is safe.
 Teardown `needs` supplies service connection env without starting services.
 Successful teardown detaches repository leases, even with no hooks. Only the
 coordinator removes a reviewed, safe worktree after verified cleanup; the

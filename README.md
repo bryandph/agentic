@@ -843,8 +843,11 @@ print a stdout line beginning `verified:`; any stdout containing `skipped`
 actual resource absence, not merely command dispatch. A required failure stops
 teardown and vetoes removal. Non-required teardown hooks need no `verified:`
 line and may print `skipped`; a nonzero exit is reported but does not stop later
-hooks or veto removal. Use `required = false` only for cleanup that is safe to
-leave unverified. Teardown `needs` supplies connection env without starting
+hooks or veto removal. Every stdout line from a non-required hook is prefixed
+`optional[<name>]: `, including any `verified:` line; removal retains this output
+but excludes it from required verification and defensive `skipped` detection.
+Required hook output stays unprefixed. Use `required = false` only for cleanup
+that is safe to leave unverified. Teardown `needs` supplies connection env without starting
 services. After successful verification, teardown detaches the worktree from
 all its repository service leases. No declared teardown hooks succeeds with a
 note and still detaches; the runner itself never removes a worktree.
