@@ -1,0 +1,737 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agentic:outcome:1",
+  "title": "agentic.outcome/1",
+  "$comment": "Additionally, decision option ids must be unique and recommendation must name an option id. These cross-value semantic constraints are enforced by workbench-outcome, not expressible in standard JSON Schema. Enable date-time format assertion. x-discriminator is an annotation used by the stdlib validator for precise diagnostics.",
+  "x-discriminator": "kind",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "agentic.outcome/1"
+        },
+        "assignment": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "issue": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "worker": {
+              "type": "string",
+              "minLength": 1
+            },
+            "run": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "repo"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "pattern": "^[^\\r\\n\\u2028\\u2029]*(?![\\s\\S])"
+        },
+        "kind": {
+          "const": "result"
+        },
+        "result": {
+          "$ref": "#/$defs/result"
+        }
+      },
+      "required": [
+        "schema",
+        "assignment",
+        "summary",
+        "kind",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "agentic.outcome/1"
+        },
+        "assignment": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "issue": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "worker": {
+              "type": "string",
+              "minLength": 1
+            },
+            "run": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "repo"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "pattern": "^[^\\r\\n\\u2028\\u2029]*(?![\\s\\S])"
+        },
+        "kind": {
+          "const": "blocked:decision"
+        },
+        "decision": {
+          "$ref": "#/$defs/decision"
+        }
+      },
+      "required": [
+        "schema",
+        "assignment",
+        "summary",
+        "kind",
+        "decision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "agentic.outcome/1"
+        },
+        "assignment": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "issue": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "worker": {
+              "type": "string",
+              "minLength": 1
+            },
+            "run": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "repo"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "pattern": "^[^\\r\\n\\u2028\\u2029]*(?![\\s\\S])"
+        },
+        "kind": {
+          "const": "blocked:approval"
+        },
+        "approval": {
+          "$ref": "#/$defs/approval"
+        }
+      },
+      "required": [
+        "schema",
+        "assignment",
+        "summary",
+        "kind",
+        "approval"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "agentic.outcome/1"
+        },
+        "assignment": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "issue": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "worker": {
+              "type": "string",
+              "minLength": 1
+            },
+            "run": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "repo"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "pattern": "^[^\\r\\n\\u2028\\u2029]*(?![\\s\\S])"
+        },
+        "kind": {
+          "const": "blocked:environment"
+        },
+        "environment": {
+          "$ref": "#/$defs/environment"
+        }
+      },
+      "required": [
+        "schema",
+        "assignment",
+        "summary",
+        "kind",
+        "environment"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "agentic.outcome/1"
+        },
+        "assignment": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "issue": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "worker": {
+              "type": "string",
+              "minLength": 1
+            },
+            "run": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "repo"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "pattern": "^[^\\r\\n\\u2028\\u2029]*(?![\\s\\S])"
+        },
+        "kind": {
+          "const": "blocked:external"
+        },
+        "external": {
+          "$ref": "#/$defs/external"
+        }
+      },
+      "required": [
+        "schema",
+        "assignment",
+        "summary",
+        "kind",
+        "external"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "agentic.outcome/1"
+        },
+        "assignment": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "issue": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "worker": {
+              "type": "string",
+              "minLength": 1
+            },
+            "run": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "repo"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "pattern": "^[^\\r\\n\\u2028\\u2029]*(?![\\s\\S])"
+        },
+        "kind": {
+          "const": "failed"
+        },
+        "failed": {
+          "$ref": "#/$defs/failed"
+        }
+      },
+      "required": [
+        "schema",
+        "assignment",
+        "summary",
+        "kind",
+        "failed"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "agentic.outcome/1"
+        },
+        "assignment": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "issue": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "worker": {
+              "type": "string",
+              "minLength": 1
+            },
+            "run": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "repo"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "pattern": "^[^\\r\\n\\u2028\\u2029]*(?![\\s\\S])"
+        },
+        "kind": {
+          "const": "handoff"
+        },
+        "handoff": {
+          "$ref": "#/$defs/handoff"
+        }
+      },
+      "required": [
+        "schema",
+        "assignment",
+        "summary",
+        "kind",
+        "handoff"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "evidence": {
+      "x-discriminator": "type",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "git-ref"
+            },
+            "remote": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha": {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})(?![\\s\\S])"
+            }
+          },
+          "required": [
+            "type",
+            "remote",
+            "ref",
+            "sha"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "check"
+            },
+            "flake": {
+              "type": "string",
+              "minLength": 1
+            },
+            "attr": {
+              "type": "string",
+              "minLength": 1
+            },
+            "exitCode": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "attr",
+            "exitCode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "file"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+            }
+          },
+          "required": [
+            "type",
+            "path",
+            "sha256"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ci"
+            },
+            "system": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pipeline": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "type",
+            "system",
+            "pipeline",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "flux"
+            },
+            "kind": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "namespace": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "type",
+            "kind",
+            "name",
+            "namespace",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "decision": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context": {
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "consequences": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "consequences"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 2
+        },
+        "recommendation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "question",
+        "context",
+        "options",
+        "recommendation",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "approval": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "action",
+        "artifact",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remediation": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "code",
+        "detail"
+      ],
+      "additionalProperties": false
+    },
+    "external": {
+      "type": "object",
+      "properties": {
+        "waitingOn": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deadline": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        }
+      },
+      "required": [
+        "waitingOn",
+        "deadline"
+      ],
+      "additionalProperties": false
+    },
+    "failed": {
+      "type": "object",
+      "properties": {
+        "attempted": {
+          "type": "string",
+          "minLength": 1
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1
+        },
+        "externalEffects": {
+          "type": "boolean"
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "attempted",
+        "error",
+        "externalEffects"
+      ],
+      "additionalProperties": false
+    },
+    "handoff": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "to",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

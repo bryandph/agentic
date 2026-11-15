@@ -32,6 +32,7 @@ in {
         pkgs.mani
         self'.packages.agentic-hooks-doctor
         self'.packages.agentic-attention-watch
+        (import ./registry/_outcome/package.nix {inherit pkgs;})
         (own.lib.worktree.setupScript pkgs)
         (own.lib.worktree.teardownScript pkgs)
         (own.lib.worktree.workerStartScript pkgs)
