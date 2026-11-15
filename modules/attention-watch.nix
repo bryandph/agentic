@@ -4,7 +4,7 @@
     packages.agentic-attention-watch = import ./_attention-watch/package.nix {inherit pkgs;};
     checks.attention-watch =
       pkgs.runCommand "agentic-attention-watch-sandbox" {
-        nativeBuildInputs = [pkgs.python3];
+        nativeBuildInputs = [(import ./_attention-watch/package.nix {inherit pkgs;}).python];
       } ''
         export HOME=$TMPDIR/home
         mkdir -p "$HOME"

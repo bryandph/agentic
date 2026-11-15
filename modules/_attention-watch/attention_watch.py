@@ -2,6 +2,8 @@
 """Host-local observation and bounded operator escalation; no agent control."""
 
 import argparse
+import asyncio
+import base64
 import datetime as dt
 import fcntl
 import fnmatch
@@ -11,8 +13,10 @@ import os
 from pathlib import Path
 import re
 import stat
+import ssl
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from urllib.parse import urlsplit
@@ -112,9 +116,9 @@ def config(path=None, server=None):
         'space': 'default', 'workspace_root': str(Path.home()),
         'state_dir': str(xdg / 'agentic-attention-watch'),
         'snapshot_dir': None, 'ci_dir': str(xdg / 'pi-ci-watch'),
-        'admin_creds': None, 'server': None, 'dry_run': False, 'host': None, 'notify_seat': None,
+        'admin_creds': None, 'server': None, 'tls_ca_file': None, 'dry_run': False, 'host': None, 'notify_seat': None,
         'pending_per_poll': 16, 'ci_lookback': 86400,
-        'thresholds': {'broker': 900,
+        'thresholds': {'broker': 900, 'busy': 600,
                        'rate_limit': 600, 'approval': 900, 'input': 900,
                        'working': 1800, 'herdr': 600, 'git': 1200, 'snapshot': 180},
         'rate_limits': {'coalesce': 120, 'hourly': 6, 'reminder': 7200},
@@ -145,6 +149,16 @@ def config(path=None, server=None):
         if not isinstance(notify_seat[selector], str) or not notify_seat[selector].strip():
             raise ValueError('invalid notify_seat config')
     c['server'] = validate_server(server if server is not None else c['server'] if c['server'] is not None else os.environ.get('AGENTIC_COTAL_SERVER'))
+    if c['tls_ca_file'] is not None:
+        try:
+            if not isinstance(c['tls_ca_file'], str) or not c['tls_ca_file']:
+                raise ValueError()
+            ca = Path(c['tls_ca_file']).expanduser().absolute()
+            if not ca.is_file():
+                raise ValueError()
+            c['tls_ca_file'] = str(ca)
+        except (OSError, ValueError):
+            raise ValueError('tls_ca_file must name an existing regular file') from None
     if not isinstance(c['space'], str) or not re.fullmatch(r'[A-Za-z0-9_-]+', c['space']):
         raise ValueError('space must be a simple nonempty name')
     c['snapshot_dir'] = c['snapshot_dir'] or str(xdg / 'cotal-seat' / c['space'])
@@ -202,8 +216,134 @@ def credential_available(c):
         raise ValueError('admin credential metadata unavailable; refusing to start') from None
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
         raise ValueError('admin credential must be a regular file owned by this user with mode exactly 0600; refusing to start')
-    # Metadata only. This process never opens or reads the credential.
+    # Metadata first; only the NATS transport subsequently reads the credential.
     return True
+
+
+def tls_context(c):
+    context = ssl.create_default_context()
+    # Add the operator's CA bundle without replacing default roots or relaxing
+    # verification. Match the CLI's extra trust when launched in the same env.
+    for path in (c['tls_ca_file'] or os.environ.get('SSL_CERT_FILE'),
+                 os.environ.get('NODE_EXTRA_CA_CERTS')):
+        if path:
+            context.load_verify_locations(cafile=path)
+    return context
+
+
+def nats_client(require_tls):
+    from nats.aio.client import Client
+
+    class TLSClient(Client):
+        async def _process_info(self, info, initial_connection=False):
+            # nats-py 2.12 treats a tls:// URL as opportunistic: a forged INFO
+            # without tls_required otherwise downgrades CONNECT to plaintext.
+            # Refuse before CONNECT/authentication, including on reconnect.
+            if require_tls and initial_connection and info.get('tls_required') is not True:
+                raise Unavailable()
+            return await super()._process_info(info, initial_connection=initial_connection)
+
+    return TLSClient()
+
+
+async def nats_connect(**kwargs):
+    client = nats_client(urlsplit(kwargs['servers'][0]).scheme == 'tls')
+    try:
+        await asyncio.wait_for(client.connect(**kwargs), timeout=kwargs['connect_timeout'])
+        return client
+    except BaseException:
+        await client.close()
+        raise
+
+
+class ConsumerInfo:
+    """One transport and event loop for the watcher's lifetime; no JS consumers.
+
+    The background loop keeps ping/reconnect running even between synchronous polls.
+    Only the transport reads credentials; neither credentials nor errors are exported.
+    """
+
+    def __init__(self, c, connect=None):
+        self.c, self.connect = c, connect
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self.thread.start()
+        self.nc = None
+        self.retry_at, self.backoff = 0, 2
+
+    async def request(self, subject, timeout):
+        if self.nc is None:
+            if time.monotonic() < self.retry_at:
+                raise Unavailable()
+            try:
+                server = self.c['server']
+                if server is None:
+                    home = Path(os.environ.get('COTAL_HOME', '~/.cotal')).expanduser()
+                    entry = read_json(home / 'meshes' / ('space.' + self.c['space'].encode().hex() + '.json'))
+                    if entry.get('space') != self.c['space']:
+                        raise Unavailable()
+                    server = validate_server(entry['server'])
+                    if entry.get('tlsRequired'):
+                        url = urlsplit(server)
+                        server = url._replace(scheme={'nats': 'tls', 'ws': 'wss'}.get(url.scheme, url.scheme)).geturl()
+                connect = self.connect
+                if connect is None:
+                    connect = nats_connect
+                # Static admin grants scope replies to the credential's public nkey,
+                # not nats-py's default account-wide _INBOX. Never export the JWT.
+                creds = Path(self.c['admin_creds']).read_text()
+                jwt = re.search(r'-----BEGIN NATS USER JWT-----\s+(\S+)', creds)[1]
+                payload = jwt.split('.')[1]
+                public = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))['sub']
+                if not re.fullmatch(r'U[A-Z2-7]{55}', public):
+                    raise Unavailable()
+
+                async def discard_error(error):
+                    pass
+
+                self.nc = await connect(servers=[server], user_credentials=self.c['admin_creds'],
+                                        inbox_prefix=('_INBOX_' + public).encode(),
+                                        tls=tls_context(self.c),
+                                        connect_timeout=min(5, timeout), allow_reconnect=True,
+                                        max_reconnect_attempts=-1, reconnect_time_wait=2,
+                                        error_cb=discard_error)
+                self.backoff = 2
+            except Exception:
+                self.retry_at = time.monotonic() + self.backoff
+                self.backoff = min(60, self.backoff * 2)
+                raise Unavailable() from None
+        if not self.nc.is_connected:
+            raise Unavailable()
+        reply = await self.nc.request(subject, b'', timeout=timeout)
+        data = json.loads(reply.data)
+        if 'error' in data:
+            raise Unavailable()
+        return data
+
+    def read(self, principal, uid, timeout=20):
+        if (not isinstance(principal, str) or not re.fullmatch(r'[A-Za-z0-9_]+\.[A-Za-z0-9_]+', principal)
+                or not isinstance(uid, str) or not re.fullmatch(r'[a-z0-9]{26,32}', uid)):
+            raise Unavailable()
+        subject = '$JS.API.CONSUMER.INFO.DM_' + self.c['space'] + '.dm_' + principal.replace('.', '-') + '-' + uid
+        future = asyncio.run_coroutine_threadsafe(self.request(subject, timeout), self.loop)
+        try:
+            data = future.result(timeout=timeout)
+            return {'pending': data['num_pending'], 'ackPending': data['num_ack_pending'],
+                    'ackFloor': data['ack_floor']['stream_seq'], 'delivered': data['delivered']['stream_seq']}
+        except Exception:
+            future.cancel()
+            raise Unavailable() from None
+
+    def close(self):
+        if self.nc is not None:
+            future = asyncio.run_coroutine_threadsafe(self.nc.close(), self.loop)
+            try:
+                future.result(timeout=5)
+            except Exception:
+                future.cancel()
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(timeout=5)
+        self.loop.close()
 
 
 class Watcher:
@@ -226,6 +366,29 @@ class Watcher:
         self.sessions = {}
         self.current_source = None
         self.observations = {}
+        self.consumer = None
+        self.busy_names = set()
+        self.skipped_busy = set()
+        self.activity_ages = {}
+
+    def close(self):
+        if self.consumer is not None:
+            self.consumer.close()
+
+    def busy(self, p):
+        ages = [v for v in (self.activity_ages.get(p['name']), self.presence_age(p)) if v is not None]
+        return p['reportedStatus'] == 'working' and (p['name'] in self.busy_names or
+                bool(ages and min(ages) < self.c['thresholds']['busy']))
+
+    def presence_age(self, p):
+        if p.get('activeAt') is not None:
+            try:
+                return max(0, self.clock() - number(stamp(p['activeAt'])))
+            except Unavailable:
+                return None
+        return text_age(' '.join(str(v) for v in (
+            p.get('facts', {}).get('condition', ''), p.get('facts', {}).get('ages', ''),
+            p.get('activityAge', ''))), 'active')
 
     def add(self, kind, subject, facts, threshold, since=None, human=False):
         self.findings.append({'kind': kind, 'subject': subject, 'facts': facts,
@@ -245,9 +408,13 @@ class Watcher:
         return self.state['seen'].setdefault(key, now)
 
     def presence(self, now):
-        data = command(['cotal', 'endpoints', '--space', self.c['space'], '--json'])
-        if data.get('kind') != 'live-presence' or not isinstance(data.get('items'), list):
+        data = command(['cotal', 'who', '--space', self.c['space'], '--json'], allow_partial=True)
+        if data.get('kind') != 'roster' or data.get('view') != 'current' or not isinstance(data.get('items'), list):
             raise Unavailable()
+        for p in data['items']:
+            p['reportedStatus'] = p.get('status')
+            if p.get('host') is not None:
+                p.setdefault('meta', {})['host'] = p['host']
         items = [p for p in data['items'] if p.get('kind') == 'agent'
                  and p.get('reportedStatus') in ('idle', 'waiting', 'working')]
         self.seats = [p['name'] for p in items if p.get('role') == 'seat']
@@ -266,20 +433,25 @@ class Watcher:
             text = condition + ' ' + ages + ' ' + str(p.get('activityAge', ''))
             for kind in ('rate_limit', 'approval', 'input'):
                 age = text_age(text, re.escape(kind) + r' for')
+                condition = p.get('condition') or {}
+                if condition.get('code') == kind and condition.get('since') is not None:
+                    age = max(0, now - stamp(condition['since']))
                 if age is not None and age >= self.c['thresholds'][kind]:
                     self.add(kind, name, f'{kind} age={int(age)}s', self.c['thresholds'][kind])
-            active = text_age(text, 'active')
-            if p['reportedStatus'] == 'working' and active is not None and active >= self.c['thresholds']['working']:
-                self.add('working-stale', name, f'last active age={int(active)}s', self.c['thresholds']['working'])
         return items
 
     def pending(self, items, now):
+        busy = [p for p in items if self.busy(p)]
+        self.skipped_busy = {p['name'] for p in busy}
+        self.pending_checked.update(self.skipped_busy)  # Busy is known suppressed, not deferred.
+        items = [p for p in items if not self.busy(p)]
         self.state['brokerCoverageSeconds'] = self.interval * max(1, math.ceil(len(items) / self.c['pending_per_poll']))
+        self.observations['S2'] = {'inspectedPeers': 0, 'deferredPeers': len(items), 'skippedBusy': len(busy),
+                                   'candidateAges': 'unavailable: consumer info only'}
         if not credential_available(self.c):
             self.sources['S2'] = 'unavailable: admin credential absent (optional)'
             return
-        self.sources['S2'] = 'available; redelivery unavailable in Cotal 0.91; candidate ages bounded'
-        self.observations['S2'] = {'inspectedPeers': 0, 'deferredPeers': len(items), 'suppressedPeers': 0}
+        self.sources['S2'] = 'available; candidate ages and redelivery unavailable (consumer info only)'
         items = sorted(items, key=lambda p: p['name'])
         start = self.state.get('pending_cursor', 0) % max(1, len(items))
         selected = (items[start:] + items[:start])[:self.c['pending_per_poll']]
@@ -291,10 +463,14 @@ class Watcher:
             name = p['name']
             self.state['pending_cursor'] = (items.index(p) + 1) % len(items)
             self.pending_checked.add(name)
-            data = command(['cotal', 'pending', name, '--space', self.c['space'],
-                            '--creds', self.c['admin_creds'], '--json'] +
-                           (['--server', self.c['server']] if self.c['server'] else []),
-                           allow_partial=True, timeout=min(20, remaining))
+            principal, uid = p.get('id'), p.get('lifecycleUid')
+            if (not isinstance(principal, str) or not re.fullmatch(r'[A-Za-z0-9_]+\.[A-Za-z0-9_]+', principal)
+                    or not isinstance(uid, str) or not re.fullmatch(r'[a-z0-9]{26,32}', uid)):
+                self.sources['S2'] = 'unavailable: presence principal or lifecycle uid unavailable'
+                continue
+            if self.consumer is None:
+                self.consumer = ConsumerInfo(self.c)
+            data = self.consumer.read(principal, uid, timeout=min(20, remaining))
             now = self.clock()  # Timestamp this agent's completed read, not the poll start.
             self.observations['S2']['inspectedPeers'] += 1
             self.observations['S2']['deferredPeers'] -= 1
@@ -319,20 +495,10 @@ class Watcher:
             else:
                 since = previous['since']
                 previous['observedAt'] = now
-            candidate_ages = [max(0, now - stamp(row['ts'])) for row in data.get('candidates', [])
-                              if isinstance(row, dict) and 'ts' in row]
-            candidate_age = max(candidate_ages, default=0)
             local_age = now - since
-            active = text_age(' '.join(str(v) for v in (
-                p.get('facts', {}).get('condition', ''), p.get('facts', {}).get('ages', ''),
-                p.get('activityAge', ''))), 'active')
-            busy = (p['reportedStatus'] == 'working' and active is not None
-                    and active < self.c['thresholds']['working'])
-            if count and local_age >= self.c['thresholds']['broker'] and busy:
-                self.observations['S2']['suppressedPeers'] += 1
-            elif count and local_age >= self.c['thresholds']['broker']:
+            if count and local_age >= self.c['thresholds']['broker']:
                 self.add('broker-backlog', name,
-                         f'pending={pending}; ackPending={ack}; ackFloor={floor}; delivered={delivered}; unchanged floor with backlog={int(local_age)}s; bounded sample of recent candidates age={int(candidate_age)}s (not the oldest held); redelivery unavailable in this Cotal version',
+                         f'pending={pending}; ackPending={ack}; ackFloor={floor}; delivered={delivered}; unchanged floor with backlog={int(local_age)}s; candidate ages and redelivery unavailable (consumer info only)',
                          self.c['thresholds']['broker'])
 
     def snapshots(self, now):
@@ -363,6 +529,9 @@ class Watcher:
             written = number(stamp(data['writtenAt']))
             age = max(0, now - written)
             live = alive(data['pid'])
+            if live:
+                active_age = max(0, now - number(stamp(data['activeAt']))) if data.get('activeAt') is not None else age
+                self.activity_ages[name] = min(age, active_age)
             if (live and age <= self.c['thresholds']['snapshot']
                     and Path(data['cwd']).resolve().is_relative_to(Path(self.c['workspace_root']).resolve())):
                 self.notify_seat_snapshots.add(name)
@@ -390,6 +559,10 @@ class Watcher:
                 raise Unavailable()
             if not isinstance(info.get('foreground_processes'), list):
                 raise Unavailable()
+            if row.get('agent_status') == 'working':
+                owners = self.context.get(str(cwd), set())
+                if len(owners) == 1:
+                    self.busy_names.update(owners)
             blocked = row.get('agent_status') in ('blocked', 'waiting', 'input', 'approval')
             self.observations['S4']['blockedAgents'] += int(blocked)
             key = 'herdr:' + pane
@@ -462,6 +635,7 @@ class Watcher:
         now = self.clock()
         self.findings, self.sources, self.local_names, self.context, self.sessions = [], {}, set(), {}, {}
         self.observations = {}
+        self.busy_names, self.activity_ages, self.skipped_busy = set(), {}, set()
         self.notify_seat_snapshots = set()
         self.live_names, self.pending_checked = set(), set()
         self.current_source = 'S1'
@@ -472,11 +646,7 @@ class Watcher:
             self.seats = []
             items = []
             self.unavailable('S1')
-        self.current_source = 'S2'
-        try:
-            self.pending(items, now)
-        except (Unavailable, OSError, KeyError, TypeError):
-            self.unavailable('S2')
+        # Read local activity enrichment before deciding whether S2 may inspect a peer.
         for source, read in [('S3', self.snapshots), ('S4', self.herdr), ('S5', self.git), ('S6', self.ci)]:
             self.current_source = source
             self.sources[source] = 'available'
@@ -486,6 +656,16 @@ class Watcher:
                 if source == 'S3':
                     self.notify_seat_snapshots.clear()
                 self.unavailable(source)
+        self.current_source = 'S1'
+        for p in items:
+            active = self.presence_age(p)
+            if not self.busy(p) and p['reportedStatus'] == 'working' and active is not None and active >= self.c['thresholds']['working']:
+                self.add('working-stale', p['name'], f'last active age={int(active)}s', self.c['thresholds']['working'])
+        self.current_source = 'S2'
+        try:
+            self.pending(items, now)
+        except (Unavailable, OSError, KeyError, TypeError, ValueError):
+            self.unavailable('S2')
         return self.findings
 
     def reconcile(self):
@@ -508,7 +688,9 @@ class Watcher:
         for key, event in events.items():
             if key not in current and event['active']:
                 source = event['finding'].get('source')
-                if source and str(self.sources.get(source, '')).startswith('unavailable') and event['finding']['kind'] != 'source-unavailable':
+                if (source and str(self.sources.get(source, '')).startswith('unavailable')
+                        and event['finding']['kind'] != 'source-unavailable'
+                        and not (source == 'S2' and event['finding']['subject'] in self.skipped_busy)):
                     continue  # An unreadable source is unknown, never a resolution.
                 if source == 'S2' and event['finding']['subject'] in self.live_names and event['finding']['subject'] not in self.pending_checked:
                     continue  # Deferred by per-poll cap, not proven resolved.
@@ -611,6 +793,7 @@ def main(argv=None):
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
+    watcher = None
     try:
         c = config(args.config, server=args.server)
         if args.admin_creds:
@@ -673,6 +856,9 @@ def main(argv=None):
             message = str(exc)
         print('agentic-attention-watch: ' + message, file=sys.stderr)
         return 1
+    finally:
+        if watcher is not None:
+            watcher.close()
 
 
 if __name__ == '__main__':

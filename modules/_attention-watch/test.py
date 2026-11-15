@@ -1,4 +1,5 @@
 """Sandbox qualification: fake executables, fixtures, and an injected clock."""
+import base64
 import contextlib
 import importlib.util
 import io
@@ -29,11 +30,8 @@ if (name == 'cotal' and args[0] == 'send') or (name == 'herdr' and args[:2] == [
 key = name
 if name == 'cotal':
     key += ':' + args[0]
-    if args[0] == 'pending':
-        expected = f.get('server')
-        assert (args[args.index('--server')+1] if '--server' in args else None) == expected
-    else:
-        assert '--server' not in args
+    assert args[0] != 'pending', 'S2 must never invoke cotal pending'
+    assert '--server' not in args
 if name == 'herdr': key += ':' + ':'.join(args[:2])
 if key in f.get('fail', []):
     print('NEVER_EXPORT_PENDING_OR_CREDENTIAL_9182', file=sys.stderr)
@@ -69,7 +67,7 @@ class Sandbox(unittest.TestCase):
                           WATCH_FIXTURE=str(self.fixture_path), WATCH_DELIVERIES=str(self.delivery_path))
         self.addCleanup(lambda: (os.environ.clear(), os.environ.update(self.old_env)))
         self.fixture = {
-            'cotal:endpoints': {'kind': 'live-presence', 'items': [self.peer('operator', 'seat'), self.peer('worker')]},
+            'cotal:who': {'kind': 'roster', 'view': 'current', 'items': [self.peer('operator', 'seat'), self.peer('worker')]},
             'cotal:pending': {'pending': 1, 'ackPending': 0, 'ackFloor': 1, 'delivered': 2,
                               'durable': SENTINEL, 'candidates': [{'id': SENTINEL, 'from': SENTINEL, 'ts': (self.now - 10000)*1000}]},
             'herdr:agent:list': {'agents': []},
@@ -78,10 +76,20 @@ class Sandbox(unittest.TestCase):
         }
         self.snapshot('worker')
         self.write_fixture()
+        self.transport = patch.object(a, 'ConsumerInfo')
+        self.fake_transport = self.transport.start().return_value
+        self.fake_transport.read.side_effect = self.read_consumer
+        self.addCleanup(self.transport.stop)
         self.w = a.Watcher(self.c, clock=lambda: self.now)
 
-    def peer(self, name, role='worker', ages='', condition='', status='working'):
-        return {'name': name, 'role': role, 'kind': 'agent', 'reportedStatus': status,
+    def read_consumer(self, principal, uid, timeout=20):
+        if 'cotal:pending' in self.fixture.get('fail', []):
+            raise a.Unavailable()
+        return self.fixture['cotal:pending']
+
+    def peer(self, name, role='worker', ages='', condition='', status='idle'):
+        return {'name': name, 'id': 'local.' + name, 'lifecycleUid': 'a' * 26,
+                'role': role, 'kind': 'agent', 'status': status,
                 'facts': {'condition': condition, 'ages': ages}, 'activityAge': ''}
 
     def write_fixture(self):
@@ -127,17 +135,19 @@ class Sandbox(unittest.TestCase):
     def test_s1_text_threshold_crossings(self):
         for kind, limit in [('rate_limit', 600), ('approval', 900), ('input', 900)]:
             with self.subTest(kind=kind):
-                p = self.fixture['cotal:endpoints']['items'][1]
+                p = self.fixture['cotal:who']['items'][1]
                 p['facts']['condition'] = f'{kind} for {limit-1}s'
                 self.assertNotIn(kind, self.observe())
                 p['facts']['condition'] = f'{kind} for {limit}s'
                 self.assertIn(kind, self.observe())
+        p['status'] = 'working'
+        self.snapshot('worker', writtenAt=(self.now - 601)*1000)
         p['facts']['ages'] = ' · unchanged for 40m · active 3h ago'
         self.assertIn('working-stale', self.observe())
         p['facts']['ages'] = ' · unchanged for 40m'
         self.assertNotIn('working-stale', self.observe())
         # Offline entries and nonlocal workers cannot become work findings.
-        p['reportedStatus'] = 'offline'
+        p['status'] = 'offline'
         self.assertNotIn('rate_limit', self.observe())
 
     def test_s2_floor_stall_restart_advance_zero_and_privacy(self):
@@ -170,9 +180,9 @@ class Sandbox(unittest.TestCase):
         self.assertIn('snapshot-stale', self.observe())
         self.snapshot('worker', pid=999999999)
         self.assertIn('snapshot-stale', self.observe())
-        self.fixture['cotal:endpoints']['items'][1]['reportedStatus'] = 'offline'
+        self.fixture['cotal:who']['items'][1]['status'] = 'offline'
         self.assertNotIn('snapshot-stale', self.observe())
-        self.fixture['cotal:endpoints']['items'][1]['reportedStatus'] = 'working'
+        self.fixture['cotal:who']['items'][1]['status'] = 'working'
         self.snapshot('worker', schema='future')
         self.observe()
         self.assertEqual(self.w.sources['S3'], 'unavailable')
@@ -283,7 +293,7 @@ class Sandbox(unittest.TestCase):
                 self.assertEqual(self.emit(), [])
 
     def test_source_failure_routes_human_with_sanitized_errors(self):
-        self.fixture['fail'] = ['cotal:endpoints', 'herdr:agent:list', 'ps']
+        self.fixture['fail'] = ['cotal:who', 'herdr:agent:list', 'ps']
         self.observe()
         self.w.deliver()
         self.now += 120
@@ -328,12 +338,12 @@ class Sandbox(unittest.TestCase):
             a.credential_available(self.c)
 
     def test_unreadable_source_is_unknown_not_resolved_or_resent(self):
-        self.fixture['cotal:endpoints']['items'][1]['facts']['condition'] = 'rate_limit for 12m'
+        self.fixture['cotal:who']['items'][1]['facts']['condition'] = 'rate_limit for 12m'
         self.observe()
         self.w.deliver()
         self.now += 120
         self.emit()
-        self.fixture['fail'] = ['cotal:endpoints']
+        self.fixture['fail'] = ['cotal:who']
         self.observe()
         self.w.deliver()
         self.assertTrue(self.w.state['events']['rate_limit:worker']['active'])
@@ -375,7 +385,7 @@ class Sandbox(unittest.TestCase):
         for path in Path(self.c['snapshot_dir']).glob('*.json'):
             path.unlink()
         Path(self.c['snapshot_dir']).rmdir()
-        self.fixture['cotal:endpoints']['items'][1]['facts']['condition'] = 'rate_limit for 12m'
+        self.fixture['cotal:who']['items'][1]['facts']['condition'] = 'rate_limit for 12m'
         self.assertIn('rate_limit', self.observe())
         self.assertEqual([f for f in self.w.findings if f['kind'] == 'source-unavailable'], [])
         self.assertIn('no snapshots', self.w.sources['S3'])
@@ -393,7 +403,7 @@ class Sandbox(unittest.TestCase):
         self.assertFalse(any('subject=S3' in d['text'] or 'subject=S2' in d['text'] for d in preview))
 
     def test_presence_host_filter_on_off_and_untagged(self):
-        items = self.fixture['cotal:endpoints']['items']
+        items = self.fixture['cotal:who']['items']
         items[0]['card'] = {'meta': {'host': 'other-host'}}
         items[1]['card'] = {'meta': {'host': 'this-host'}}
         items.extend([self.peer('remote'), self.peer('untagged')])
@@ -433,8 +443,9 @@ class Sandbox(unittest.TestCase):
         self.assertTrue(self.w.state['events']['broker-backlog:worker']['active'])
         self.c['pending_per_poll'] = 16
         with patch.object(a.time, 'monotonic', side_effect=[0, 1, 61]):
-            with patch.object(a, 'command', return_value=self.fixture['cotal:pending']) as run:
-                self.w.pending(self.fixture['cotal:endpoints']['items'], self.now)
+            with patch.object(self.fake_transport, 'read', return_value=self.fixture['cotal:pending']) as run:
+                self.w.pending([{**p, 'reportedStatus': p['status']}
+                                for p in self.fixture['cotal:who']['items']], self.now)
                 self.assertEqual(run.call_count, 1)
                 self.assertLessEqual(run.call_args.kwargs['timeout'], 59)
 
@@ -523,7 +534,8 @@ class Sandbox(unittest.TestCase):
         path.write_text(json.dumps({**self.c, 'server': 'invalid'}))
         result = subprocess.run([sys.executable, str(ROOT / 'attention_watch.py'), 'run', '--once', '--dry-run', '--config', str(path), '--server', flag_server], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)['report']['observations']['S2']['inspectedPeers'], 2)
+        self.assertEqual(json.loads(result.stdout)['report']['observations']['S2']['inspectedPeers'], 0)
+        self.assertTrue(json.loads(result.stdout)['report']['sources']['S2'].startswith('unavailable'))
         self.assertNotIn(flag_server, result.stdout + result.stderr)
 
     def test_notify_seat_unset_one_and_two_live_seats(self):
@@ -559,7 +571,7 @@ class Sandbox(unittest.TestCase):
 
     def test_notify_seat_pattern_local_live_snapshot_and_fail_closed(self):
         self.c['notify_seat'] = {'pattern': 'coord-BPH-*', 'local': True}
-        self.fixture['cotal:endpoints']['items'] = [self.peer('coord-BPH-one', 'seat'),
+        self.fixture['cotal:who']['items'] = [self.peer('coord-BPH-one', 'seat'),
             self.peer('coord-BPH-two', 'seat'), self.peer('worker', condition='rate_limit for 12m')]
         self.snapshot('coord-BPH-one')
         self.observe()
@@ -655,41 +667,231 @@ class Sandbox(unittest.TestCase):
         toml.write_text('[notify_seat]\npattern = "coord-BPH-*"\nlocal = true\n')
         self.assertEqual(a.config(toml)['notify_seat'], {'pattern': 'coord-BPH-*', 'local': True})
 
-    def test_s2_busy_fresh_keeps_floor_then_idle_waiting_or_stale_fires(self):
+    def test_s2_busy_skips_read_and_suppresses_existing_alert(self):
         self.credential()
-        p = self.fixture['cotal:endpoints']['items'][1]
-        p['activityAge'] = 'active 2m ago'
+        p = self.fixture['cotal:who']['items'][1]
         self.observe()
         since = self.w.state['broker_progress']['worker']['since']
         self.now += 900
-        self.restart()
+        self.assertIn('broker-backlog', self.observe())
+        self.w.reconcile()
+        p.update(status='working', activeAt=(self.now - 120)*1000)
+        self.fake_transport.read.reset_mock()
         self.observe()
-        self.assertFalse(any(f['kind'] == 'broker-backlog' and f['subject'] == 'worker'
+        self.assertFalse(any(f['kind'] in ('broker-backlog', 'working-stale') and f['subject'] == 'worker'
                              for f in self.w.findings))
-        self.assertEqual(self.w.observations['S2']['suppressedPeers'], 1)
-        self.assertEqual(self.w.state['broker_progress']['worker'],
-                         {'floor': 1, 'since': since, 'observedAt': self.now})
-        for status, activity in [('idle', 'active 2m ago'), ('waiting', 'active 2m ago'),
-                                 ('working', 'active 30m ago'), ('working', '')]:
-            with self.subTest(status=status, activity=activity):
-                p.update(reportedStatus=status, activityAge=activity)
+        self.assertEqual(self.w.observations['S2']['skippedBusy'], 1)
+        self.assertEqual(self.fake_transport.read.call_count, 1)  # operator only
+        self.assertEqual(self.w.state['broker_progress']['worker']['observedAt'], self.now)
+        self.w.reconcile()
+        self.assertFalse(self.w.state['events']['broker-backlog:worker']['active'])
+        for status, age in [('idle', 120), ('waiting', 120), ('working', 600), ('working', None)]:
+            with self.subTest(status=status, age=age):
+                p.update(status=status, activeAt=(self.now - age)*1000 if age is not None else None)
                 self.observe()
                 self.assertTrue(any(f['kind'] == 'broker-backlog' and f['subject'] == 'worker'
                                     for f in self.w.findings))
                 self.assertEqual(self.w.state['broker_progress']['worker']['since'], since)
-                self.assertEqual(self.w.observations['S2']['suppressedPeers'], 0)
-        # The pending suppression itself never treats an offline peer as busy;
-        # normal observation still polls only live peers (existing S2 eligibility).
-        p.update(reportedStatus='offline', activityAge='active 2m ago')
-        self.w.findings = []
-        self.w.pending([p], self.now)
-        self.assertEqual([f['kind'] for f in self.w.findings], ['broker-backlog'])
+                self.assertEqual(self.w.observations['S2']['skippedBusy'], 0)
+
+    def test_busy_snapshot_active_write_and_herdr_enrichment(self):
+        self.credential()
+        p = self.fixture['cotal:who']['items'][1]
+        p.update(status='working', activeAt=(self.now - 3600)*1000)
+        for fields in [dict(activeAt=(self.now - 1)*1000, writtenAt=(self.now - 601)*1000),
+                       dict(activeAt=(self.now - 3600)*1000, writtenAt=self.now*1000)]:
+            self.snapshot('worker', **fields)
+            self.observe()
+            self.assertEqual(self.w.observations['S2']['skippedBusy'], 1)
+            self.assertFalse(any(f['kind'] == 'working-stale' for f in self.w.findings))
+        self.snapshot('worker', activeAt=(self.now - 3600)*1000, writtenAt=(self.now - 601)*1000)
+        self.fixture['herdr:agent:list']['agents'] = [
+            {'pane_id': 'p1', 'agent_status': 'working', 'cwd': self.c['workspace_root']}]
+        self.observe()
+        self.assertEqual(self.w.observations['S2']['skippedBusy'], 1)
+        self.fixture['herdr:agent:list']['agents'][0]['agent_status'] = 'blocked'
+        self.now += 600
+        self.observe()
+        self.now += 600
+        self.assertIn('herdr-blocked', self.observe())
+        self.assertIn('working-stale', {f['kind'] for f in self.w.findings})
+
+    def test_s2_uid_missing_is_unavailable_no_read_no_crash(self):
+        self.credential()
+        for p in self.fixture['cotal:who']['items']:
+            p.pop('lifecycleUid')
+        self.observe()
+        self.assertIn('lifecycle uid unavailable', self.w.sources['S2'])
+        self.assertEqual(self.w.observations['S2']['inspectedPeers'], 0)
+        self.fake_transport.read.assert_not_called()
+
+    def test_s1_who_structured_projection_and_incomplete_roster(self):
+        p = self.fixture['cotal:who']['items'][1]
+        p['condition'] = {'code': 'approval', 'since': (self.now - 901)*1000, 'message': SENTINEL}
+        p['extraFutureField'] = SENTINEL
+        self.assertIn('approval', self.observe())
+        self.assertNotIn(SENTINEL, json.dumps(self.w.report()))
+        self.fixture['cotal:who']['view'] = 'stale'
+        self.observe()
+        self.assertEqual(self.w.sources['S1'], 'unavailable')
 
     def test_delivery_bounds_cannot_be_loosened(self):
         path = self.root / 'config.toml'
         path.write_text('[rate_limits]\ncoalesce = 0\nhourly = 100\nreminder = 1\n')
         c = a.config(path)
         self.assertEqual(c['rate_limits'], {'coalesce': 120, 'hourly': 6, 'reminder': 7200})
+
+
+class Transport(unittest.TestCase):
+    def test_extra_ca_bundles_preserve_defaults_and_precedence(self):
+        c = a.config()
+        for configured, env, expected in [
+                (None, {}, []),
+                (None, {'SSL_CERT_FILE': '/env-ca', 'NODE_EXTRA_CA_CERTS': '/node-ca'}, ['/env-ca', '/node-ca']),
+                ('/config-ca', {'SSL_CERT_FILE': '/env-ca', 'NODE_EXTRA_CA_CERTS': '/node-ca'}, ['/config-ca', '/node-ca']),
+                (None, {'NODE_EXTRA_CA_CERTS': '/node-ca'}, ['/node-ca'])]:
+            with self.subTest(configured=configured, env=env):
+                c['tls_ca_file'] = configured
+                with patch.dict(os.environ, env, clear=True), patch.object(a.ssl, 'create_default_context') as create:
+                    context = create.return_value
+                    self.assertIs(a.tls_context(c), context)
+                    create.assert_called_once_with()
+                    self.assertEqual(context.load_verify_locations.call_args_list,
+                                     [unittest.mock.call(cafile=path) for path in expected])
+                    # No verification/hostname policy setters are used.
+                    self.assertEqual(context.method_calls,
+                                     [unittest.mock.call.load_verify_locations(cafile=path) for path in expected])
+        with patch.dict(os.environ, {'NODE_EXTRA_CA_CERTS': '/bad-ca'}, clear=True):
+            with patch.object(a.ssl, 'create_default_context') as create:
+                create.return_value.load_verify_locations.side_effect = OSError(SENTINEL)
+                with self.assertRaises(OSError):
+                    a.tls_context(a.config())  # Invalid trust fails closed; no insecure fallback.
+
+    def test_tls_ca_file_config_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / 'config.json'
+            ca = root / 'ca.pem'
+            ca.write_text('synthetic CA fixture')
+            config.write_text(json.dumps({'tls_ca_file': str(ca)}))
+            self.assertEqual(a.config(config)['tls_ca_file'], str(ca))
+            for bad in ['', 123, str(root / 'absent'), str(root)]:
+                with self.subTest(value=bad):
+                    config.write_text(json.dumps({'tls_ca_file': bad}))
+                    with self.assertRaisesRegex(ValueError, 'existing regular file'):
+                        a.config(config)
+
+    def test_packaged_auth_and_tls_downgrade_guard_offline(self):
+        try:
+            import nkeys
+        except ImportError:
+            self.skipTest('package environment required for real NATS auth test')
+        import asyncio
+        import inspect
+        from nats.aio.client import Client
+        # Synthetic key material only; no broker or real credential is accessed.
+        seed = nkeys.encode_seed(bytes(range(32)), nkeys.PREFIX_BYTE_USER)
+        key = nkeys.from_seed(seed)
+        public = key.public_key.decode()
+        payload = base64.urlsafe_b64encode(json.dumps({'sub': public}).encode()).decode().rstrip('=')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'synthetic.creds'
+            path.write_text('-----BEGIN NATS USER JWT-----\nh.' + payload + '.s\n------END NATS USER JWT------\n'
+                            + '-----BEGIN USER NKEY SEED-----\n' + seed.decode() + '\n------END USER NKEY SEED------\n')
+            client = a.nats_client(True)
+            client._user_credentials = str(path)
+            client._setup_nkeys_jwt_connect()
+            signature = client._signature_cb('nonce')
+            self.assertTrue(key.verify(b'nonce', base64.b64decode(signature)))
+            self.assertEqual(bytes(client._user_jwt_cb()), ('h.' + payload + '.s').encode())
+            self.assertIn('inbox_prefix', inspect.signature(Client.connect).parameters)
+            with self.assertRaises(a.Unavailable):
+                asyncio.run(client._process_info({'tls_required': False}, initial_connection=True))
+            with self.assertRaises(a.Unavailable):
+                asyncio.run(client._process_info({}, initial_connection=True))
+
+    def test_only_info_single_connection_across_polls_and_reply_scope(self):
+        # The fake transport must not depend on host/sandbox CA bundle paths;
+        # extra-root loading is qualified separately with a mocked SSL context.
+        self.enterContext(patch.object(a, 'tls_context', return_value=object()))
+        with tempfile.TemporaryDirectory() as directory:
+            c = a.config(server='tls://broker.invalid:4222')
+            c['admin_creds'] = str(Path(directory) / 'admin.creds')
+            public = 'U' + 'A' * 55
+            payload = base64.urlsafe_b64encode(json.dumps({'sub': public}).encode()).decode().rstrip('=')
+            Path(c['admin_creds']).write_text('-----BEGIN NATS USER JWT-----\nh.' + payload + '.s\n------END NATS USER JWT------')
+            Path(c['admin_creds']).chmod(0o600)
+            requests, connections = [], []
+
+            class Client:
+                is_connected = True
+
+                async def request(self, subject, body, timeout):
+                    requests.append(subject)
+                    self.assert_empty = body == b''
+                    return type('Reply', (), {'data': json.dumps({
+                        'num_pending': 1, 'num_ack_pending': 0, 'ack_floor': {'stream_seq': 2},
+                        'delivered': {'stream_seq': 3}, 'extra': SENTINEL}).encode()})()
+
+                async def close(self):
+                    self.is_connected = False
+
+            client = Client()
+
+            async def connect(**kwargs):
+                connections.append(kwargs)
+                return client
+
+            info = a.ConsumerInfo(c, connect=connect)
+            self.addCleanup(info.close)
+            now = [2_000_000_000]
+            watcher = a.Watcher(c, clock=lambda: now[0])
+            watcher.consumer = info
+            peer = {'name': 'worker', 'id': 'local.worker', 'lifecycleUid': 'a' * 26, 'reportedStatus': 'idle'}
+            watcher.pending([peer], now[0])
+            now[0] += 900
+            watcher.pending([peer], now[0])
+            self.assertEqual(len(connections), 1)
+            self.assertEqual(requests, ['$JS.API.CONSUMER.INFO.DM_default.dm_local-worker-' + 'a' * 26] * 2)
+            self.assertTrue(client.assert_empty)
+            self.assertEqual(connections[0]['servers'], ['tls://broker.invalid:4222'])
+            self.assertEqual(connections[0]['inbox_prefix'], ('_INBOX_' + public).encode())
+            self.assertEqual(connections[0]['max_reconnect_attempts'], -1)
+            self.assertGreater(connections[0]['reconnect_time_wait'], 0)
+            self.assertIn('broker-backlog', {f['kind'] for f in watcher.findings})
+            self.assertNotIn(SENTINEL, json.dumps(watcher.state) + json.dumps(watcher.observations))
+            peer.update(reportedStatus='working', activeAt=now[0]*1000)
+            watcher.pending([peer], now[0])
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(watcher.observations['S2']['skippedBusy'], 1)
+            # A reconnecting transport remains the same client; polls do not dial.
+            client.is_connected = False
+            with self.assertRaises(a.Unavailable):
+                info.read('local.worker', 'a' * 26)
+            self.assertEqual(len(connections), 1)
+            self.assertEqual(len(requests), 2)
+            client.is_connected = True
+            info.read('local.worker', 'a' * 26)
+            self.assertEqual(len(connections), 1)
+
+            attempts = []
+
+            async def failed_connect(**kwargs):
+                attempts.append(kwargs)
+                raise OSError(SENTINEL)
+
+            failed = a.ConsumerInfo(c, connect=failed_connect)
+            self.addCleanup(failed.close)
+            for _ in range(2):
+                with self.assertRaises(a.Unavailable):
+                    failed.read('local.worker', 'a' * 26)
+            self.assertEqual(len(attempts), 1)  # failed initial dial is backed off
+            self.assertEqual(failed.backoff, 4)
+            failed.retry_at = 0
+            with self.assertRaises(a.Unavailable):
+                failed.read('local.worker', 'a' * 26)
+            self.assertEqual(len(attempts), 2)
+            self.assertEqual(failed.backoff, 8)
 
 
 if __name__ == '__main__':
