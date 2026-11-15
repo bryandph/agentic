@@ -79,12 +79,13 @@ herdr worktree remove --workspace <returned-workspace-id>
 
 Wait for setup before launching. Check exits 0 for current success, 1 for
 failure, 2 for a missing result, 3 for a stale executable or v1 record, 4 for
-a non-linked checkout, and 5 for degraded setup. `--check --json <path>`
-prints the record and its SHA-256 digest. Worker start refuses degraded setup
+a non-linked checkout, 5 for degraded setup, and 6 for blocked setup.
+`--check --json <path>` prints the record and its SHA-256 digest. Worker start refuses degraded setup
 (31) unless the coordinator reviews and passes `--accept-setup <digest>`
 and a non-empty `--reason`; failed/missing/stale/non-linked setup is never
-overridable (30). Do not mistake process launch for setup success or assignment
-acceptance. Trust projection is also warning-only; an actual Pi trust or
+overridable (30). Blocked setup returns `setup-blocked` (32), and
+`--accept-setup` cannot override it. Do not mistake process launch for setup
+success or assignment acceptance. Trust projection is also warning-only; an actual Pi trust or
 authentication prompt still needs operator attention. Core never grants trust.
 
 Setup runs declared recursive submodule initialization, file copies, state and
@@ -94,7 +95,12 @@ Record v2 lists each step's applicability and outcome. Shell selection is
 declared in `workbench.worktree.shell`: auto prefers available devenv, then
 flake, otherwise none. Missing devShell attributes are not-applicable.
 Discovery and warm-up failure degrade setup and allow hooks to continue unless
-`shell.required = true`; other steps remain required. `agentic-worktree-setup` remains an
+`shell.required = true`; other steps remain required. The environment blocker
+`nix-relativeworktrees` instead stops discovery, the devShell probe, or warm-up
+regardless of `shell.required`, recording `blocker` with the Nix version,
+bounded stderr and remediation. Convert repository worktrees to absolute links
+and unset `extensions.relativeWorktrees` (operator cleanup), or use Nix >=
+2.34.9. Service blockers come in a later step. `agentic-worktree-setup` remains an
 alias for the canonical creator-neutral command.
 
 Each `workbench.worktree.teardownHooks` command must exit zero and print a

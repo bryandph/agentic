@@ -369,15 +369,15 @@
     hmValid =
       withHerdr.programs.herdr.extraConfig.worktrees.directory
       == "/home/fixture/ws/.worktrees"
-      && withHerdr.programs.git.settings.worktree.useRelativePaths
-      && withoutHerdr.programs.git.settings.worktree.useRelativePaths
+      && !withHerdr.programs.git.settings.worktree.useRelativePaths
+      && !withoutHerdr.programs.git.settings.worktree.useRelativePaths
       && unset.programs.herdr.extraConfig == {}
       && !(unset.programs.git.settings ? worktree)
       && both.agentic.workspace.worktreeDir == "/home/fixture/ws/.worktrees"
       && byWorkbench.programs.herdr.extraConfig.worktrees.directory == "/home/fixture/ws/.worktrees"
       && byWorkbench.agentic.workspace.root == "/home/fixture/ws"
       && bothByWorkbench.agentic.workspace.worktreeDir == "/home/fixture/ws/.worktrees"
-      && bothByWorkbench.programs.git.settings.worktree.useRelativePaths;
+      && !bothByWorkbench.programs.git.settings.worktree.useRelativePaths;
   in {
     checks.workspace-devenv = assert devenvValid;
       pkgs.runCommand "agentic-workspace-devenv" {nativeBuildInputs = [pkgs.mani pkgs.git];} ''

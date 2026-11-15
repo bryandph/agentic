@@ -356,6 +356,70 @@
         expect_code 1 ${requiredShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
         test ! -e two/setup-order
         jq -e '.status == "failed" and .failedStep == "warm-up" and (.steps[-1] | .applies == true and .required == true and .outcome == "failed" and (.message | contains("fixture probe eval failure")))' "$(record two)"
+        # BPH-66: old libgit2 rejects the repo-wide relativeWorktrees extension.
+        # Fake only Nix, before the real binary on PATH, for each failing call.
+        mkdir "$TMPDIR/fake-nix"
+        cat > "$TMPDIR/fake-nix/nix" <<'EOF'
+        #!${pkgs.runtimeShell}
+        set -eu
+        fail() {
+          for i in $(seq 1 30); do echo "older diagnostic $i" >&2; done
+          echo 'error: unsupported extension name ExTeNsIoNs.ReLaTiVeWoRkTrEeS' >&2
+          exit 1
+        }
+        case "$*" in
+          --version) echo 'nix (Nix) 2.34.7';;
+          'flake metadata --json')
+            if [ "$NIX_FAIL_AT" = discovery ]; then fail; fi;;
+          'eval --impure --raw --expr builtins.currentSystem')
+            if [ "$NIX_FAIL_AT" = system ]; then fail; fi
+            echo '${system}';;
+          'eval --json --impure --expr '*)
+            if [ "$NIX_FAIL_AT" = probe ]; then fail; fi
+            echo '["default"]';;
+          'develop '*) fail;;
+          *) echo "unexpected fixture nix call: $*" >&2; exit 99;;
+        esac
+        EOF
+        chmod +x "$TMPDIR/fake-nix/nix"
+        real_path="$PATH"
+        export PATH="$TMPDIR/fake-nix:$PATH"
+        for NIX_FAIL_AT in discovery system probe warm-up; do
+          export NIX_FAIL_AT
+          blocked_step=warm-up
+          if [ "$NIX_FAIL_AT" = discovery ]; then blocked_step=discovery; fi
+          for required in false true; do
+            blocked_setup=${flakeShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup
+            blocked_start=${flakeShell.worktreeLib.workerStartScript pkgs}/bin/workbench-worker-start
+            if "$required"; then
+              blocked_setup=${requiredShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup
+              blocked_start=${requiredShell.worktreeLib.workerStartScript pkgs}/bin/workbench-worker-start
+            fi
+            rm -f two/setup-order
+            expect_code 6 "$blocked_setup" --worktree "$TMPDIR/two"
+            test ! -e two/setup-order
+            jq -e --arg step "$blocked_step" --argjson required "$required" '
+              .status == "blocked" and .failedStep == $step and
+              (.steps[-1] | .name == $step and .outcome == "blocked" and .required == $required and .exitCode == 1) and
+              ([.steps[] | select(.name | startswith("setupHooks"))] | length == 0) and
+              (.blocker | .kind == "environment" and .code == "nix-relativeworktrees" and .step == $step and
+                .nixVersion == "nix (Nix) 2.34.7" and (.detail | contains("ExTeNsIoNs.ReLaTiVeWoRkTrEeS")) and
+                (.detail | length <= 2048) and (.detail | split("\n") | length <= 20) and
+                (.remediation | contains("absolute links") and contains("operator cleanup") and contains("nix >= 2.34.9")))' "$(record two)"
+            expect_code 6 "$blocked_setup" --check "$TMPDIR/two"
+            expect_code 6 "$blocked_setup" --check --json "$TMPDIR/two"
+            jq -e '.status == "blocked" and .code == 6 and .record.blocker.code == "nix-relativeworktrees" and (.digest | length == 64)' "$TMPDIR/stdout"
+            blocked_digest="$(jq -r .digest "$TMPDIR/stdout")"
+            expect_code 32 "$blocked_start" --pane fixture --worktree "$TMPDIR/two" -- launcher
+            jq -e '.status == "setup-blocked" and (has("setupOverride") | not)' "$TMPDIR/stdout"
+            expect_code 32 "$blocked_start" --pane fixture --worktree "$TMPDIR/two" \
+              --accept-setup "$blocked_digest" --reason 'reviewed but not overridable' -- launcher
+            jq -e '.status == "setup-blocked" and (.reason | contains("cannot override")) and (has("setupOverride") | not)' "$TMPDIR/stdout"
+          done
+        done
+        cp "$(record two)" "$TMPDIR/blocked-sample.json"
+        export PATH="$real_path"
+        unset NIX_FAIL_AT
         # Broken discovery degrades by default and still runs ordered hooks.
         echo 'invalid nix !' > two/flake.nix
         rm -f two/setup-order
@@ -403,6 +467,7 @@
         expect_check 0 "$TMPDIR/two"
         mkdir "$out"
         cp "$TMPDIR/degraded-sample.json" "$out/degraded-sample.json"
+        cp "$TMPDIR/blocked-sample.json" "$out/blocked-sample.json"
       '';
   };
 }

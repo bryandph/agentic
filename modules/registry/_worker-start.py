@@ -72,9 +72,12 @@ def main():
         if setup_override is not None:
             record["setupOverride"] = setup_override
         print(json.dumps(record))
-        return {"started": 0, "blocked": 10, "not-started": 11, "launch-failed": 20, "setup-failed": 30, "setup-degraded": 31}[status]
+        return {"started": 0, "blocked": 10, "not-started": 11, "launch-failed": 20, "setup-failed": 30, "setup-degraded": 31, "setup-blocked": 32}[status]
 
     code, out, err = run([os.environ["AGENTIC_WORKTREE_SETUP"], "--check", "--json", worktree], timeout=30)
+    if code == 6:
+        diagnostics.append(out + err)
+        return finish("setup-blocked", "worktree setup blocked; --accept-setup cannot override blocked setup")
     if code == 5:
         diagnostics.append(err)
         try:

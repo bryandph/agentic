@@ -32,7 +32,7 @@ if case in ("setup-missing", "setup-failed"):
     print("worktree setup " + case, file=sys.stderr)
     sys.exit(2 if case == "setup-missing" else 1)
 status = os.environ.get("SETUP_STATUS", "ok")
-code = {"ok":0, "degraded":5, "failed":1, "missing":2, "stale":3, "not-applicable":4}[status]
+code = {"ok":0, "degraded":5, "failed":1, "missing":2, "stale":3, "not-applicable":4, "blocked":6}[status]
 print(json.dumps(dict(status=status, code=code, digest="a"*64, record={})))
 sys.exit(code)
 ''')
@@ -154,6 +154,8 @@ else: raise AssertionError(a)
 
     # Review is bound to the exact setup record, never a blanket bypass.
     for setup_status, options, code, status in [
+        ("blocked", [], 32, "setup-blocked"),
+        ("blocked", ["--accept-setup", "a"*64, "--reason", "cannot override"], 32, "setup-blocked"),
         ("degraded", [], 31, "setup-degraded"),
         ("degraded", ["--accept-setup", "a"*64, "--reason", "reviewed shell failure"], 0, "started"),
         ("degraded", ["--accept-setup", "b"*64, "--reason", "reviewed"], 31, "setup-degraded"),
@@ -177,6 +179,10 @@ else: raise AssertionError(a)
                         if setup_status == "degraded" else
                         dict(digest="a"*64, reason="no longer needed", status="unused"))
             assert record["setupOverride"] == expected, record
+        elif setup_status == "blocked":
+            assert "cannot override" in record["reason"]
+            assert "setupOverride" not in record
+            assert not (root / "calls").exists()
         elif options and options[1] == "b"*64:
             assert "digest mismatch" in record["reason"]
         print("override", setup_status, options, "ok")
