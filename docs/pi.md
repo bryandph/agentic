@@ -95,7 +95,14 @@ Record v2 lists each step's applicability and outcome. Shell selection is
 declared in `workbench.worktree.shell`: auto prefers available devenv, then
 flake, otherwise none. Missing devShell attributes are not-applicable.
 Discovery and warm-up failure degrade setup and allow hooks to continue unless
-`shell.required = true`; other steps remain required. The environment blocker
+`shell.required = true`; other built-in steps remain required. Hooks accept plain
+strings (still required) or `{ name; run; required ? true; needs ? []; }`.
+Names are unique `[A-Za-z0-9_-]` tokens within each list. Named setup steps use
+`setupHooks[<name>]`, while strings keep `setupHooks[<index>]`. Non-required
+setup hook failures degrade the record and allow later hooks to run. Hook
+`needs` must reference keys in `workbench.worktree.services` (default `{}`);
+unknown names fail evaluation. Named setup steps record their `needs`. Service
+declarations are placeholders for step 5; no services are started or checked. The environment blocker
 `nix-relativeworktrees` instead stops discovery, the devShell probe, or warm-up
 regardless of `shell.required`, recording `blocker` with the Nix version,
 bounded stderr and remediation. Convert repository worktrees to absolute links
@@ -103,9 +110,13 @@ and unset `extensions.relativeWorktrees` (operator cleanup), or use Nix >=
 2.34.9. Service blockers come in a later step. `agentic-worktree-setup` remains an
 alias for the canonical creator-neutral command.
 
-Each `workbench.worktree.teardownHooks` command must exit zero and print a
-stdout line starting `verified:`, without printing `skipped`. Any failure
-stops cleanup and vetoes removal; no hooks succeeds with a note. Only the
+Each required `workbench.worktree.teardownHooks` command (including plain
+strings) must exit zero and print a stdout line starting `verified:`, without
+printing `skipped` (case-insensitive). A required failure stops cleanup and
+vetoes removal. Non-required hooks need no verification line and may print
+`skipped`; nonzero exits are reported but neither stop later hooks nor veto
+removal. Mark cleanup non-required only when leaving it unverified is safe.
+Teardown `needs` is validated but not acted on. No hooks succeeds with a note. Only the
 coordinator removes a reviewed, safe worktree after verified cleanup; the
 runner never removes it or uses force. Stock Git refuses removal of a
 worktree with initialized submodules even after deinit; after verified teardown

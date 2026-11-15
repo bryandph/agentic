@@ -20,7 +20,17 @@
           })
         ];
       }).lib.worktree;
-    good = fixture ["echo verified: resources absent"];
+    good = fixture [
+      {
+        name = "optional-cleanup";
+        run = "echo optional cleanup failed; exit 3";
+        required = false;
+      }
+      {
+        name = "required-cleanup";
+        run = "echo verified: resources absent";
+      }
+    ];
     bad = fixture ["echo cleanup failed; exit 1"];
     skipped = fixture ["echo verified: resources absent; echo skipped: unavailable"];
   in {

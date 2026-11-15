@@ -65,6 +65,92 @@
         imports = [base];
         agentic.worktree.setupHooks = lib.mkForce ["echo failing >&2; exit 9"];
       }).lib.fixture;
+    namedFailing =
+      (fixture {
+        agentic.worktree.shell.kind = "none";
+        agentic.worktree.setupHooks = [
+          {
+            name = "required-check";
+            run = "exit 7";
+          }
+        ];
+      }).lib.fixture;
+    namedDegraded =
+      (fixture {
+        agentic.worktree.shell.kind = "none";
+        agentic.worktree.services.database = {};
+        agentic.worktree.setupHooks = [
+          {
+            name = "optional-check";
+            run = "exit 8";
+            required = false;
+            needs = ["database"];
+          }
+          {
+            name = "later";
+            run = "touch named-later";
+          }
+          "touch plain-later"
+        ];
+      }).lib.fixture;
+    optionalTeardown =
+      (fixture {
+        agentic.worktree.teardownHooks = [
+          {
+            name = "optional-cleanup";
+            run = "exit 4";
+            required = false;
+          }
+          {
+            name = "no-proof-needed";
+            run = "echo skipped: optional";
+            required = false;
+          }
+          {
+            name = "required-cleanup";
+            run = "touch teardown-later; echo verified: absent";
+          }
+        ];
+      }).lib.fixture;
+    namedNoProof =
+      (fixture {
+        agentic.worktree.teardownHooks = [
+          {
+            name = "required-proof";
+            run = "echo complete";
+          }
+        ];
+      }).lib.fixture;
+    invalidHooks = phase: hooks:
+      builtins.tryEval (builtins.deepSeq
+        (fixture {agentic.worktree.${phase} = hooks;}).lib.fixture.worktree.${phase}
+        true);
+    invalidHookChecks = lib.all (
+      phase:
+        !(invalidHooks phase [
+          {
+            name = "duplicate";
+            run = "true";
+          }
+          {
+            name = "duplicate";
+            run = "true";
+          }
+        ]).success
+        && !(invalidHooks phase [
+          {
+            name = "consumer";
+            run = "true";
+            needs = ["missing-service"];
+          }
+        ]).success
+        && !(invalidHooks phase [
+          {
+            name = "invalid.name";
+            run = "true";
+          }
+        ]).success
+    ) ["setupHooks" "teardownHooks"];
     globs =
       (fixture {
         agentic.worktree.copyFiles = [".env.*" "config/*.local" "missing/*.local" "space dir/*.local"];
@@ -88,7 +174,7 @@
     setup = "${good.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup";
     teardown = "${good.worktreeLib.teardownScript pkgs}/bin/workbench-worktree-teardown";
   in {
-    checks.worktree-setup =
+    checks.worktree-setup = assert invalidHookChecks;
       pkgs.runCommand "workbench-worktree-setup-fixtures" {
         nativeBuildInputs = [pkgs.nix pkgs.git pkgs.jq pkgs.coreutils pkgs.gnugrep pkgs.bashInteractive] ++ lib.optional pkgs.stdenv.isDarwin fixtureDevenv;
       } ''
@@ -321,6 +407,23 @@
         expect_code 9 ${failing.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/one"
         jq -e '.status == "failed" and .failedStep == "setupHooks[0]"' "$(record one)"
         expect_code 1 ${failing.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --check "$TMPDIR/one"
+        # Named required failure is fatal; optional failure records needs and
+        # degrades while both later named and legacy string hooks still run.
+        expect_code 7 ${namedFailing.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/one"
+        jq -e '.status == "failed" and .failedStep == "setupHooks[required-check]" and (.steps[-1] | .required == true and .exitCode == 7 and .needs == [])' "$(record one)"
+        ${namedDegraded.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/one"
+        jq -e '.status == "degraded" and .failedStep == "setupHooks[optional-check]" and (.steps[] | select(.name == "setupHooks[optional-check]") | .required == false and .outcome == "failed" and .exitCode == 8 and .needs == ["database"]) and (.steps[-1] | .name == "setupHooks[2]" and .required == true and (has("needs") | not))' "$(record one)"
+        test -f one/named-later
+        test -f one/plain-later
+        cp "$(record one)" "$TMPDIR/named-degraded-sample.json"
+        expect_code 5 ${namedDegraded.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --check --json "$TMPDIR/one"
+        jq -e '.status == "degraded" and .code == 5' "$TMPDIR/stdout"
+        expect_code 0 ${optionalTeardown.worktreeLib.teardownScript pkgs}/bin/workbench-worktree-teardown --worktree "$TMPDIR/one"
+        grep -F 'teardownHooks[optional-cleanup] failed: exit 4; continuing (not required)' "$TMPDIR/stderr"
+        test -f one/teardown-later
+        expect_code 1 ${namedNoProof.worktreeLib.teardownScript pkgs}/bin/workbench-worktree-teardown --worktree "$TMPDIR/one"
+        grep -F 'teardownHooks[required-proof] failed: missing verified:' "$TMPDIR/stderr"
+        rm one/named-later one/plain-later one/teardown-later
         ${setup} --worktree "$TMPDIR/one"
         # v1 is stale even when it names the current setup command.
         jq 'del(.schema)' "$(record two)" > legacy
@@ -467,6 +570,7 @@
         expect_check 0 "$TMPDIR/two"
         mkdir "$out"
         cp "$TMPDIR/degraded-sample.json" "$out/degraded-sample.json"
+        cp "$TMPDIR/named-degraded-sample.json" "$out/named-degraded-sample.json"
         cp "$TMPDIR/blocked-sample.json" "$out/blocked-sample.json"
       '';
   };
