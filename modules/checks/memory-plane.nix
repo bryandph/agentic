@@ -46,8 +46,20 @@
     in
       pkgs.runCommand "agentic-memory-plane" {
         nativeBuildInputs = [pkgs.gnugrep];
+        templates = ../../templates;
       } ''
         set -euo pipefail
+
+        # Project templates must keep the generated namespace out of Git.
+        # The workspace template instead ignores everything by default.
+        for ignore in default/.gitignore rust/.gitignore python/.gitignore \
+          polyglot/.gitignore embedded/.gitignore adopt/.gitignore-additions; do
+          if ! grep -qxF '.serena/memories/knowledge/' "$templates/$ignore"; then
+            echo "$ignore must ignore .serena/memories/knowledge/" >&2
+            exit 1
+          fi
+        done
+
         export HOME="$TMPDIR/home"
         mkdir -p "$HOME" "$TMPDIR/repo"
         cd "$TMPDIR/repo"
