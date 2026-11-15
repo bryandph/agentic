@@ -100,7 +100,7 @@
       && !(mentionsHerdr (lib.attrNames disabled.home.activation))
       # homeModules.workspace alone: no programs.herdr, git still configured.
       && !(workspaceOnly.options ? programs.herdr)
-      && workspaceOnly.config.programs.git.settings.worktree.useRelativePaths
+      && workspaceOnly.config.programs.git.settings.worktree.useRelativePaths == false
       # Consumer namespace: its own programs.herdr, declared once.
       && viaConsumer.programs.herdr.owner == "consumer"
       && viaConsumer.programs.herdr.extraConfig.worktrees.directory == "/home/fixture/ws/.worktrees";

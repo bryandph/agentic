@@ -329,7 +329,9 @@ let
     };
 
     config = lib.mkIf (cfg.root != null) (lib.mkMerge [
-      {programs.git.settings.worktree.useRelativePaths = lib.mkDefault true;}
+      # Nix with older libgit2 (2.34.7, 2.35pre) cannot open a repo with
+      # extensions.relativeWorktrees; one relative worktree sets it repo-wide.
+      {programs.git.settings.worktree.useRelativePaths = lib.mkDefault false;}
       # herdr's HM module is consumer-provided; configure it only where present.
       (lib.optionalAttrs (options ? programs.herdr) {
         programs.herdr.extraConfig.worktrees.directory = lib.mkDefault cfg.worktreeDir;

@@ -60,7 +60,7 @@
             record_json="$(jq -cs 'if length == 1 then .[0] else null end' "$record" 2>/dev/null || echo null)"
             if jq -e 'type == "object" and (has("schema") | not)' "$record" >/dev/null 2>&1; then
               state=stale code=3
-            elif ! jq -e 'type == "object" and .schema == "workbench.worktree-setup/2" and (.steps | type == "array") and (.status == "ok" or .status == "degraded" or .status == "failed") and (.setupCommand | type == "string")' "$record" >/dev/null 2>&1; then
+            elif ! jq -e 'type == "object" and .schema == "workbench.worktree-setup/2" and (.steps | type == "array") and (.status == "ok" or .status == "degraded" or .status == "failed" or .status == "blocked") and (.setupCommand | type == "string")' "$record" >/dev/null 2>&1; then
               state=failed code=1
             elif [ "$(jq -r .setupCommand "$record")" != "$setup_command" ]; then
               state=stale code=3
@@ -68,6 +68,8 @@
               state=ok code=0
             elif [ "$(jq -r .status "$record")" = degraded ]; then
               state=degraded code=5
+            elif [ "$(jq -r .status "$record")" = blocked ]; then
+              state=blocked code=6
             else
               state=failed code=1
             fi
@@ -86,7 +88,19 @@
         git_dir="$(GIT_WORK_TREE="$PWD" git -c submodule.recurse=false rev-parse --absolute-git-dir)"
         started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         step="" steps='[]' degraded=false first_failure=""
-        step_required=true
+        step_required=true blocker=null
+        block_relative_worktrees() {
+          local stderr="$1" code="$2" detail nix_version
+          if ! grep -qiF 'unsupported extension name extensions.relativeworktrees' <<< "$stderr"; then return 0; fi
+          detail="$(printf '%s\n' "$stderr" | tail -n 20 | tail -c 2048)"
+          nix_version="$(nix --version 2>&1 || true)"
+          blocker="$(jq -cn --arg step "$step" --arg version "$nix_version" --arg detail "$detail" \
+            '{kind: "environment", code: "nix-relativeworktrees", step: $step, nixVersion: $version, detail: $detail,
+              remediation: "The repository has extensions.relativeWorktrees set, so the nix on PATH cannot open it. Convert its worktrees to absolute links and unset the extension (operator cleanup), or use nix >= 2.34.9."}')"
+          echo "$detail" >&2
+          end_step blocked "$code" true "" "$detail"
+          exit 6
+        }
         end_step() {
           local outcome="$1" code="$2" applies="$3" reason="$4" message="''${5:-}"
           steps="$(jq -c --arg name "$step" --arg outcome "$outcome" --argjson code "$code" \
@@ -127,16 +141,19 @@
             if "$degraded"; then status=degraded failed_step="$first_failure"; fi
           elif [ -z "$failed_step" ]; then failed_step="$first_failure"
           fi
+          if [ "$blocker" != null ]; then
+            status=blocked failed_step="$(jq -r .step <<< "$blocker")"
+          fi
           record_tmp="$(mktemp "$git_dir/workbench-setup.json.XXXXXX")"
-          jq -n --arg status "$status" --arg step "$failed_step" --argjson steps "$steps" \
+          jq -n --arg status "$status" --arg step "$failed_step" --argjson steps "$steps" --argjson blocker "$blocker" \
             --arg warm "$warm_result" --argjson warmCode "$warm_status" \
             --arg start "$started_at" --arg finish "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg command "$setup_command" --arg staleSocket "$stale_socket_removed" \
             --argjson configured "$submodules_configured" --argjson initialized "$submodules_initialized" \
             --argjson excluded "$submodules_excluded" --argjson skipped "$submodules_skipped" \
-            '{schema: "workbench.worktree-setup/2", steps: $steps, submodules: {configured: $configured, initialized: $initialized, excluded: $excluded, skipped: $skipped}, fsmonitor: {staleSocketRemoved: (if $staleSocket == "" then null else $staleSocket end)}, status: $status, failedStep: (if $step == "" then null else $step end), warmUp: {status: $warm, exitCode: $warmCode}, startedAt: $start, finishedAt: $finish, setupCommand: $command}' > "$record_tmp"
+            '{schema: "workbench.worktree-setup/2", steps: $steps, submodules: {configured: $configured, initialized: $initialized, excluded: $excluded, skipped: $skipped}, fsmonitor: {staleSocketRemoved: (if $staleSocket == "" then null else $staleSocket end)}, status: $status, failedStep: (if $step == "" then null else $step end), warmUp: {status: $warm, exitCode: $warmCode}, startedAt: $start, finishedAt: $finish, setupCommand: $command} + (if $blocker == null then {} else {blocker: $blocker} end)' > "$record_tmp"
           mv -f "$record_tmp" "$git_dir/workbench-setup.json"
-          if [ "$result" != 0 ] && [ "$failed_step" != submodule-stub ]; then echo "worktree $worktree: setup failed at $failed_step; see $git_dir/workbench-setup.json" >&2; fi
+          if [ "$result" != 0 ] && [ "$failed_step" != submodule-stub ]; then echo "worktree $worktree: setup $status at $failed_step; see $git_dir/workbench-setup.json" >&2; fi
           exit "$result"
         }
         trap finish EXIT
@@ -186,12 +203,16 @@
           fi
         fi
         # Probe before artifact placement: Nix may not discover linked submodules.
+        discovery_stderr="$(mktemp)"
         if [ "$shell_kind" != flake ]; then
           end_step not-applicable null false "resolved shell kind is $shell_kind"
-        elif nix flake metadata --json >/dev/null 2>&1; then
+        elif nix flake metadata --json >/dev/null 2>"$discovery_stderr"; then
           end_step ok 0 true ""
         else
           discovery_status=$?
+          discovery_detail="$(< "$discovery_stderr")"
+          rm -f "$discovery_stderr"
+          block_relative_worktrees "$discovery_detail" "$discovery_status"
           if [ -f .git ] && grep -q '\.git/modules/' .git 2>/dev/null; then
             discovery_message="$(printf '%s\n' \
               "agentic: nix cannot initialize in this worktree of a SUBMODULE" \
@@ -202,10 +223,15 @@
           else
             discovery_message="agentic: nix flake discovery failed in this worktree (not the submodule constraint) — investigate before continuing."
           fi
+          if [ -n "$discovery_detail" ]; then
+            discovery_detail="$(printf '%s\n' "$discovery_detail" | tail -n 20 | tail -c 2048)"
+            discovery_message="$discovery_message"$'\n'"$discovery_detail"
+          fi
           echo "$discovery_message" >&2
           end_step failed "$discovery_status" true "" "$discovery_message"
           if "$shell_required"; then exit "$discovery_status"; fi
         fi
+        rm -f "$discovery_stderr"
         begin_step submodule-discovery
         main_wt="$(git -c submodule.recurse=false worktree list --porcelain | head -1 | sed 's/^worktree //')"
         # Git's -z config output separates key and value with a newline and
@@ -334,40 +360,40 @@
         begin_step warm-up
         step_required="$shell_required"
         warm_result=skipped warm_status=0
-        warm_applies=true warm_reason="" warm_probe_message=""
+        warm_applies=true warm_reason=""
+        probe_stderr="$(mktemp)"
         case "$shell_kind" in
           none) warm_applies=false; warm_reason="resolved shell kind is none" ;;
           devenv)
-            devenv shell -- true >/dev/null 2>&1 || warm_status=$?
+            devenv shell -- true >/dev/null 2>"$probe_stderr" || warm_status=$?
             ;;
           flake)
             # attrNames evaluates names, not shell derivations. A missing
             # system (or devShells output) is also an absent shell, not failure.
-            probe_stderr="$(mktemp)"
             if system="$(nix eval --impure --raw --expr builtins.currentSystem 2>"$probe_stderr")"; then
               if attrs="$(nix eval --json --impure --expr "let f = builtins.getFlake (toString ./.); in builtins.attrNames (f.devShells.$system or {})" 2>"$probe_stderr")"; then
                 if jq -e --arg attr "$shell_attr" 'index($attr) != null' <<< "$attrs" >/dev/null; then
-                  nix develop ".#$shell_attr" --impure -c true >/dev/null 2>&1 || warm_status=$?
+                  nix develop ".#$shell_attr" --impure -c true >/dev/null 2>"$probe_stderr" || warm_status=$?
                 else
                   warm_applies=false; warm_reason="devShells.$system.$shell_attr is absent"
                 fi
               else
                 warm_status=1
                 warm_reason="could not inspect devShells for the current system"
-                warm_probe_message="$(< "$probe_stderr")"
               fi
             else
               warm_status=1
               warm_reason="could not determine the current system"
-              warm_probe_message="$(< "$probe_stderr")"
             fi
-            rm -f "$probe_stderr"
             ;;
         esac
+        warm_probe_message="$(< "$probe_stderr")"
+        rm -f "$probe_stderr"
         if ! "$warm_applies"; then
           end_step not-applicable null false "$warm_reason"
         elif [ "$warm_status" != 0 ]; then
           warm_result=failed
+          block_relative_worktrees "$warm_probe_message" "$warm_status"
           warm_message="agentic: dev shell warm-up failed; sandboxed agents may be unable to enter it"
           if [ -n "$warm_probe_message" ]; then
             warm_probe_message="$(printf '%s\n' "$warm_probe_message" | tail -n 20 | tail -c 2048)"

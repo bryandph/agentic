@@ -421,9 +421,11 @@ the command reminds you when a checkout has untracked files, and
 
 The Home Manager half, `homeModules.workspace` (also part of
 `homeModules.workbench`), takes `workbench.workspace.root`, the absolute
-path of the workspace root. Setting it makes git record worktree links as
-relative paths, so checkouts survive moving the tree, and points Herdr's
-`worktrees.directory` at `worktreeDir`, by default `<root>/.worktrees`,
+path of the workspace root. Worktree links default to absolute paths: Nix with
+older libgit2 (including Nix 2.34.7 and 2.35pre) cannot open repositories with
+`extensions.relativeWorktrees`, which one relative worktree enables repo-wide.
+Setting the root points Herdr's `worktrees.directory` at `worktreeDir`, by
+default `<root>/.worktrees`,
 where Herdr creates `<repo>/<branch>` checkouts. Herdr is configured only
 where a `programs.herdr` option exists.
 
@@ -689,8 +691,8 @@ use the same bounds and carry setup errors or Herdr lifecycle facts separately
 (state, fallback reason, visible-state flags, manifest version and matched rule),
 without detector buffer previews. The pane also prints the human-readable,
 shell-quoted launcher command before starting it. Exit codes are 0 `started`, 10
-`blocked`, 11 `not-started`, 20 `launch-failed`, 30 `setup-failed`, 31 `setup-degraded`; argument errors are CLI
-misuse. Timeout is in seconds; unclassified startup or an undetected agent
+`blocked`, 11 `not-started`, 20 `launch-failed`, 30 `setup-failed`, 31
+`setup-degraded`, 32 `setup-blocked`; argument errors are CLI misuse. Timeout is in seconds; unclassified startup or an undetected agent
 fails closed. A detected agent that never reaches working/blocked returns
 `not-started`, preserving its state and Herdr explanation fields. A returned
 shell or vanished pane is a launch failure. Herdr
@@ -708,7 +710,8 @@ the current and accepted digests. The launch JSON includes
 `setupOverride: {digest, reason, status: "degraded"}`. An ok record launches
 normally and marks a supplied override `status: "unused"`. Checks 1/2/3/4
 remain `setup-failed` (30) regardless of any override; failed setup is never
-overridable.
+overridable. A blocked setup check (6) returns `setup-blocked` (32) and
+refuses `--accept-setup`, even with a matching digest and reason.
 
 Known limitation (live-qualified with Herdr 0.9.5, Pi manifest 2026.10.01.1):
 Pi's project-trust UI is detected as `idle`, with
@@ -769,7 +772,8 @@ Configure `workbench.worktree` (or `agentic.worktree`):
   are not-applicable with a reason. Flake warm-up runs
   `nix develop .#<attr> --impure -c true`. Discovery/warm-up failures degrade
   setup and later steps still run unless `required = true`, which stops setup.
-  Other steps retain their existing required/fail-stop behavior.
+  The `nix-relativeworktrees` environment blocker always stops setup, regardless
+  of `required`. Other steps retain their existing required/fail-stop behavior.
 - `traits.submodules`: recursively initialize declared submodules (default false).
   If off while `.gitmodules` has entries, setup warns once naming
   `agentic.worktree.traits.submodules` and records `skipped: "trait-off"`;
@@ -815,11 +819,21 @@ registry configuration.
 Setup atomically writes `workbench-setup.json` inside the target's own
 `git rev-parse --absolute-git-dir`, including on failure after Git discovery.
 Record v2 contains `schema: "workbench.worktree-setup/2"` and ordered
-`steps`: each has `name`, `applies`, `outcome` (`ok|failed|not-applicable`),
+`steps`: each has `name`, `applies`, `outcome` (`ok|failed|blocked|not-applicable`),
 `required`, and optional `reason`, `exitCode`, `message`. Overall `status`
-is `ok|degraded|failed`: degraded means only non-required steps failed.
-`blocked` is reserved for later service setup and is not emitted.
-Existing fields remain: `failedStep` (first degraded failure, fatal step, or null),
+is `ok|degraded|failed|blocked`: degraded means only non-required steps failed.
+BPH-66: discovery, the devShell probe, or warm-up emits `blocked` when stderr
+contains `unsupported extension name extensions.relativeworktrees`
+(case-insensitive). Setup stops before hooks, regardless of `shell.required`,
+and exits 6. The record includes `blocker: {kind: "environment", code:
+"nix-relativeworktrees", step, nixVersion, detail, remediation}`. `nixVersion`
+is `nix --version` output; `detail` is the last 20 stderr lines, capped at 2,048
+bytes. The repository has `extensions.relativeWorktrees` set, so the Nix on
+PATH cannot open it. Operator cleanup must convert its worktrees to absolute
+links and unset the extension, or use Nix >= 2.34.9; setup never changes that
+repository-wide setting. Service blockers come in a later step.
+Existing fields remain: `failedStep` (first degraded failure, fatal or blocked
+step, or null),
 `warmUp` (`{status, exitCode}`, with status `not-run|skipped|ok|failed`),
 UTC `startedAt`/`finishedAt` timestamps, and `setupCommand` (the canonical
 executable's store path). `submodules` contains `configured` (the trait boolean),
@@ -838,9 +852,10 @@ exits nonzero; invalid arguments exit 64. Check mode does not run setup or hooks
 | 3 | v1 record (no schema), or different setup store path | Rerun the current setup command |
 | 4 | Not a linked worktree (a main checkout, or no repository) | Nothing; setup does not apply |
 | 5 | Current degraded record | Review the non-required failures; rerun or explicitly accept for worker start |
+| 6 | Current blocked record | Resolve the environment blocker, then rerun setup; never overridable |
 
 Every nonzero check prints one stderr line naming the worktree and its state;
-codes 1–3 and 5 add the `workbench-worktree-setup --worktree <path>` action, and code
+codes 1–3, 5 and 6 add the `workbench-worktree-setup --worktree <path>` action, and code
 4 says setup does not apply, so a launcher can stay silent on it. A changed setup command
 takes precedence over an older record's success/failure. `--check --json <path>`
 also prints `{status, code, digest, record}`; digest is SHA-256 of the exact
