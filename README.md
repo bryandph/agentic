@@ -71,6 +71,7 @@ workspace_root = "~/workspace"  # default: home directory
 state_dir = "~/.local/state/agentic-attention-watch"
 # admin_creds = "~/.local/share/cotal/default/attention-watch/admin.creds"
 # server = "tls://broker.example:4222" # off-registry admin connection only
+# tls_ca_file = "~/certs/ca-bundle.pem" # optional extra CA bundle (existing regular file)
 # snapshot_dir = "~/.local/state/cotal-seat/default"
 # ci_dir = "~/.local/state/pi-ci-watch"
 # dry_run = true
@@ -85,6 +86,7 @@ local = true                   # needs the seat-snapshot extension on the seat
 
 [thresholds]
 broker = 900
+busy = 600                     # working + activity newer than this skips S2
 rate_limit = 600
 approval = 900
 input = 900
@@ -107,20 +109,29 @@ in TOML/JSON, `AGENTIC_COTAL_SERVER`, or `--server <url>` (flag > config > env).
 The optional URL must have a host and a `nats`, `tls`, `ws`, or `wss` scheme;
 invalid values refuse startup. It is passed only to admin-credential calls,
 never to registry-backed endpoints/send calls, and is not printed in DMs or
-notifications. With no server configured, command routing is unchanged.
+notifications. With no server configured, S2 reads the named space's server
+from `$COTAL_HOME/meshes/space.<hex-space>.json` (default `~/.cotal/meshes`),
+honoring its TLS-required flag; missing/unreadable routing makes S2 unavailable.
+It never guesses a localhost broker. TLS URLs always use certificate and hostname
+verification. S2 starts with Python's default trust roots, then adds `tls_ca_file`
+(or `SSL_CERT_FILE` when the key is unset), followed by `NODE_EXTRA_CA_CERTS` if set,
+so the watcher can share the CLI's extra trust. Invalid `tls_ca_file` paths are
+configuration errors; unreadable or invalid CA bundles make S2 unavailable,
+never an unverified connection. No host-specific trust paths are assumed.
 An absent credential makes S2 **unavailable**, never
 healthy or zero, but is optional and does not notify the human. Before starting
 any subprocess, the watcher checks credential metadata: it refuses a symlink,
 nonregular file, wrong owner, or permission bits other than **exactly 0600**.
-It never opens, logs, prints or copies
-the credential. Provision it separately; never put credentials in Nix/config.
-Only Cotal's admin reader receives its pathname. External stderr and failed-command
-stdout are discarded, not included in logs, status or notifications.
+Only the NATS transport reads the credential, including its public nkey for the
+credential-scoped reply inbox; it never logs, prints, persists or exports its
+contents. Provision it separately; never put credentials in Nix/config.
+External stderr, transport errors and failed-command stdout are discarded, not
+included in logs, status or notifications.
 
 | Source | Observation and default escalation |
 |---|---|
-| S1 Cotal presence | `cotal endpoints --json`, using `facts.condition`, text ages in `facts.ages` and `activityAge`. Rate limit ≥10 min, approval/input ≥15 min, or working with last `active` ≥30 min. `unchanged` alone is not proof of a frozen turn. All live agents are observed without any snapshot dependency. Optional `host` limits work observations to matching `card.meta.host` (or flattened `meta.host`), including untagged agents; seat routing always uses the whole live roster. |
-| S2 broker | `cotal pending <peer> --space <space> --creds <path> --json` for **every** live agent, including coordinators, workers and the operator seat. `pending_per_poll` bounds each poll; a persisted cursor rotates coverage across polls/restarts. The S2 subprocess budget is at most one run interval (each call ≤20 s). Deferred peers are unknown, not resolved; status reports inspected/deferred/suppressed counts (no names). Nonempty `pending + ackPending` with an unchanged `ackFloor` for ≥15 min. A peer whose presence is `working` and whose last `active` age is below `thresholds.working` (default 30 min) suppresses this finding, not the pending read or floor clock: `floor`, `since` and `observedAt` keep their existing meanings. On the next read, idle/waiting or stale activity can fire immediately with the floor still unmoved; missing activity age does not suppress. Floor advances or empty backlog reset the persisted clock. Only counts, floor/delivered sequence numbers, and candidate timestamps are projected. Candidate ages are informational: a **bounded sample of recent candidates, not the oldest held**. Cotal 0.91 exposes no redelivery count: it is unavailable, not zero, and there is no active redelivery rule. No message IDs, senders, subjects or bodies are retained. |
+| S1 Cotal presence | `cotal who --json`, using structured `condition.code`/`since` and `activeAt`. One roster call per poll (replaces `endpoints`); non-current views are unavailable. Extra future fields are ignored. Rate limit ≥10 min, approval/input ≥15 min, or non-busy working with last activity ≥30 min. `unchanged` alone is not proof of a frozen turn. All live agents are observed without any snapshot dependency. Optional `host` limits work observations to matching host tags, including untagged agents; seat routing always uses the whole live roster. |
+| S2 broker | One long-lived `nats-py` connection using the existing admin credential; only `$JS.API.CONSUMER.INFO.DM_<space>.dm_<owner>-<actor>-<uid>` requests, never consumer creates/deletes, enumeration or message sampling. Reuses the connection across polls, including background pings/reconnects (2 s reconnect backoff; failed initial connections back off exponentially to 60 s). The principal and `lifecycleUid` come from S1's presence roster, verified against Cotal 0.91 `who --json` (SPEC §6 Presence.lifecycleUid, §2 dot/dash identity, §8 DM durable table). Missing/invalid principal or uid makes S2 unavailable, not zero; no new grants. Busy peers are skipped **before** any consumer read: `reportedStatus=working` with activity younger than `thresholds.busy` (default 600 s), from presence `activeAt`/activity age, a live seat snapshot's `activeAt` or write age (S3), or a uniquely associated Herdr pane reporting `working` (S4). Busy peers produce neither backlog nor working-stale findings, whatever the backlog. Other peers are bounded by `pending_per_poll`, a persisted rotating cursor and one interval's request budget (each read ≤20 s). Deferred peers are unknown, not resolved; observations report `inspectedPeers`, `deferredPeers` and `skippedBusy` (no names). Nonempty `pending + ackPending` with unchanged `ackFloor` ≥15 min alerts. Only `num_pending`, `num_ack_pending`, `ack_floor.stream_seq` and `delivered.stream_seq` are projected. Floor advances or empty backlog reset the persisted clock; skipping busy peers leaves prior clocks untouched, so a subsequent non-busy read can alert immediately if the floor stayed unchanged. Candidate ages are **unavailable** (recorded in observations), not zero: no messages are sampled. Redelivery remains unavailable with no active rule. No message IDs, senders, subjects or bodies are retained. |
 | S3 seat snapshots | Optional `cotal-seat/<space>/*.json`, schema `agentic.seat-snapshot/1`, used for liveness, owner enrichment and optional host-local seat selection. An existing snapshot whose write is stale (>3×60 s) or PID is dead **while its presence remains live** escalates as “seat process gone or wedged”. Missing snapshots produce status `unavailable: no snapshots (extension not enabled?)`, not a finding or notification. `connection: null` plus `connectionError` is normal: no queue-health inference or failure. An existing unreadable/unknown-schema snapshot is unavailable and notifies the human. |
 | S4 Herdr | `herdr agent list` and `herdr pane process-info --pane`, limited to workspace-root descendants. Blocked/waiting/input/approval observed continuously ≥10 min; first-observed clocks persist over restarts. Raw argv, command lines and terminal text are never emitted or retained. Ambiguous owner → human notification. |
 | S5 git | `ps` elapsed time and `lsof` cwd: git/git-remote/git-lfs process ≥20 min with cwd under workspace root (path boundary checked). No process arguments are inspected. Unknown owner or seat-owned git work → human notification. |
