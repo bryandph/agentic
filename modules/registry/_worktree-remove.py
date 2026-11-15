@@ -1,4 +1,4 @@
-"""Fail-closed coordinator removal barrier. External commands deliberately use PATH."""
+"""Fail-closed removal barrier. Only external (non-sibling) commands use PATH."""
 
 import json
 import os
@@ -87,17 +87,19 @@ def remove():
     record["worktree"] = options.get("--worktree")
     if not workspace:
         raise Refusal("--workspace is required")
-    repo = decode(git(os.getcwd(), "rev-parse", "--show-toplevel")).strip()
-    common = canonical(decode(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).strip())
-    listing = herdr("worktree", "list", "--cwd", repo)["worktrees"]
     info = herdr("workspace", "get", workspace)["workspace"]
     if info["workspace_id"] != workspace:
         raise Refusal("workspace identity mismatch")
     workspace_path = canonical(info["worktree"]["checkout_path"])
+    path = canonical(options.get("--worktree", workspace_path))
+    # Discover the repository from the target, never the invoking shell. The
+    # common gitdir also works for linked worktrees of submodule checkouts.
+    common = canonical(decode(git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")).strip())
+    repo = decode(checked("git", "--git-dir", common, "worktree", "list", "--porcelain", "-z")).split("\0")[0][9:]
+    listing = herdr("worktree", "list", "--cwd", repo)["worktrees"]
     matches = [item for item in listing if item.get("open_workspace_id") == workspace]
     if len(matches) != 1 or canonical(matches[0]["path"]) != workspace_path:
         raise Refusal("Herdr worktree list and workspace checkout disagree")
-    path = canonical(options.get("--worktree", workspace_path))
     record["worktree"] = path
     if path != workspace_path:
         raise Refusal("--worktree and workspace checkout disagree")
@@ -114,7 +116,7 @@ def remove():
         raise Refusal("main checkout cannot be removed")
     clean(path)
     agents_stopped(workspace)
-    result = run("workbench-worktree-teardown", "--worktree", path)
+    result = run(os.environ["AGENTIC_WORKTREE_TEARDOWN"], "--worktree", path)
     output = decode(result.stdout)
     record["teardown"] = {
         "status": "failed" if result.returncode else "passed",

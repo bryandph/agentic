@@ -37,7 +37,7 @@ in {
         (own.lib.worktree.workerStartScript pkgs)
         (own.lib.worktree.removeScript pkgs)
         (import ./registry/_seat-tools/package.nix pkgs "agentic-seat-snapshot")
-        (import ./registry/_seat-tools/package.nix pkgs "workbench-worker-recover")
+        (own.lib.worktree.workerRecoverScript pkgs)
       ];
     };
   };

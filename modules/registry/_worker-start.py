@@ -69,7 +69,7 @@ def main():
         print(json.dumps(record))
         return {"started": 0, "blocked": 10, "not-started": 11, "launch-failed": 20, "setup-failed": 30}[status]
 
-    code, out, err = run(["workbench-worktree-setup", "--check", worktree], timeout=30)
+    code, out, err = run([os.environ["AGENTIC_WORKTREE_SETUP"], "--check", worktree], timeout=30)
     if code:
         diagnostics.append(out + err)
         return finish("setup-failed", "worktree setup check failed")

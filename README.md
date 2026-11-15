@@ -648,8 +648,10 @@ observations, not a competing work/assignment journal or authorization to merge.
 
 Both shell transports include `workbench-worktree-setup`,
 `workbench-worktree-teardown`, `workbench-worker-start`, and
-`workbench-worktree-remove`. Run them from the main checkout's dev shell
+`workbench-worktree-remove`. Run them from any shell that carries them,
 against the path returned by the creator; do not infer it from the branch name.
+Sibling tools use store paths baked with the consumer's setup and teardown
+configuration, not names looked up on the invoking shell's `PATH`.
 The coordinator owns this sequence:
 
 1. `herdr worktree create --cwd <repo> --branch <branch> --base <base> --no-focus`

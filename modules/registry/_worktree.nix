@@ -297,7 +297,13 @@
         '';
     });
 
-  workerStartScript = import ./_worker-start.nix;
+  workerStartScript = pkgs:
+    (import ./_worker-start.nix pkgs).override {setupScript = setupScript pkgs;};
+
+  workerRecoverScript = pkgs:
+    (import ./_seat-tools/package.nix pkgs "workbench-worker-recover").override {
+      workerStartScript = workerStartScript pkgs;
+    };
 
   teardownScript = pkgs:
     pkgs.writeShellApplication {
@@ -338,6 +344,7 @@
       name = "workbench-worktree-remove";
       runtimeInputs = [pkgs.python3];
       text = ''
+        export AGENTIC_WORKTREE_TEARDOWN=${lib.escapeShellArg "${teardownScript pkgs}/bin/workbench-worktree-teardown"}
         exec python3 ${./_worktree-remove.py} "$@"
       '';
     };
@@ -381,7 +388,7 @@ in {
   options.agentic.worktreeLib = lib.mkOption {
     type = lib.types.raw;
     readOnly = true;
-    description = "Creator-neutral setupScript pkgs, hooksScript pkgs (isolated Git hooks), teardownScript pkgs, workerStartScript pkgs, and removeScript pkgs.";
+    description = "Creator-neutral setupScript pkgs, hooksScript pkgs (isolated Git hooks), teardownScript pkgs, workerStartScript pkgs, workerRecoverScript pkgs, and removeScript pkgs.";
   };
-  config.agentic.worktreeLib = {inherit setupScript hooksScript teardownScript workerStartScript removeScript;};
+  config.agentic.worktreeLib = {inherit setupScript hooksScript teardownScript workerStartScript workerRecoverScript removeScript;};
 }

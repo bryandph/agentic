@@ -179,6 +179,13 @@
           fi
         }
         expect_check 2 "$TMPDIR/one"
+        # Worker-start must use this consumer's setup, even in a shell with
+        # no sibling executable on PATH and an inherited foreign override.
+        ! command -v workbench-worktree-setup
+        export AGENTIC_WORKTREE_SETUP=/nonexistent/foreign-setup
+        expect_code 30 ${good.worktreeLib.workerStartScript pkgs}/bin/workbench-worker-start \
+          --pane fixture --worktree "$TMPDIR/one" -- launcher
+        jq -e '.status == "setup-failed" and (.diagnostics | contains("setup missing"))' "$TMPDIR/stdout"
         # Not applicable: the main checkout and a directory outside any
         # repository get exit 4 and no advice to run setup.
         mkdir "$TMPDIR/plain"
@@ -222,6 +229,14 @@
         # The good path initializes first, then a recursive reset works.
         ${setup} --worktree "$TMPDIR/one"
         expect_check 0 "$TMPDIR/one"
+        # Matching configured setup gets past preflight (Herdr is deliberately
+        # absent); a different configured setup sees the record as stale.
+        expect_code 20 ${good.worktreeLib.workerStartScript pkgs}/bin/workbench-worker-start \
+          --pane fixture --worktree "$TMPDIR/one" -- launcher
+        jq -e '.status == "launch-failed"' "$TMPDIR/stdout"
+        expect_code 30 ${changed.worktreeLib.workerStartScript pkgs}/bin/workbench-worker-start \
+          --pane fixture --worktree "$TMPDIR/one" -- launcher
+        jq -e '.status == "setup-failed" and (.diagnostics | contains("setup stale"))' "$TMPDIR/stdout"
         jq -e '.status == "ok" and .failedStep == null and .warmUp == {status: "ok", exitCode: 0} and (.startedAt | endswith("Z")) and (.finishedAt | endswith("Z")) and (.setupCommand | startswith("/nix/store/"))' "$(record one)"
         git -C one reset --hard main
         test "$(cat one/sub/nested/data)" = nested-data

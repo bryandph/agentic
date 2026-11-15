@@ -285,7 +285,7 @@ def recover(args, record):
                 raise ValueError("git handover inspection failed")
             return out.strip()
         head, branch = git("rev-parse", "HEAD"), git("branch", "--show-current")
-        argv = ["workbench-worker-start", "--pane", evidence["panes"][0]["pane_id"], "--worktree", args.worktree,
+        argv = [os.environ["AGENTIC_WORKER_START"], "--pane", evidence["panes"][0]["pane_id"], "--worktree", args.worktree,
                 "--", "pi-worker", "--name", name, "--cwd", args.worktree, "--space", args.space]
         if args.action == "resume":
             argv += ["--resume", session]

@@ -2,6 +2,7 @@
 import json
 import os
 import shlex
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -12,14 +13,19 @@ with tempfile.TemporaryDirectory() as root:
     root = Path(root)
     bindir = root / "bin"
     bindir.mkdir()
-    env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ["PATH"], FIXTURE=str(root))
+    env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ["PATH"], FIXTURE=str(root),
+               AGENTIC_WORKTREE_SETUP="/nonexistent/inherited-setup")
+    assert shutil.which("workbench-worktree-setup", path=env["PATH"]) is None
 
     def executable(name, source):
         path = bindir / name
         path.write_text("#!" + sys.executable + "\n" + source)
         path.chmod(0o755)
 
-    executable("workbench-worktree-setup", '''import os,sys
+    # The baked sibling executes this fixture outside PATH. No setup command
+    # is available by name in the shell that carries worker-start.
+    setup = root / "setup.py"
+    setup.write_text('''import os,sys
 assert sys.argv[1] == "--check"
 case = os.environ["CASE"]
 if case in ("setup-missing", "setup-failed"):
@@ -143,7 +149,7 @@ else: raise AssertionError(a)
         print(case, "ok")
 
     # An unavailable setup command must also yield one structured record.
-    (bindir / "workbench-worktree-setup").unlink()
+    setup.unlink()
     result = subprocess.run([sys.argv[1], "--pane", "w:p", "--worktree", str(root),
                              "--", "launcher"], env=env, capture_output=True, text=True)
     assert result.returncode == 30, result
