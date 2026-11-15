@@ -12,13 +12,14 @@
     system,
     ...
   }: let
-    mkFixture = index:
+    mkFixture = index: refreshTimeout:
       inputs.flake-parts.lib.mkFlake {inherit inputs;} {
         systems = [system];
         imports = [
           config.flake.flakeModules.default
           ({config, ...}: {
             agentic.knowledgeSearch.index = index;
+            agentic.knowledgeSearch.refreshTimeout = refreshTimeout;
             agentic.knowledgeSearch.collections = {
               fixture-repo.path = ".serena/memories";
               fixture-org.path = "org";
@@ -58,8 +59,10 @@
         ];
       };
 
-    fixture = mkFixture "user";
-    localFixture = mkFixture "local";
+    # Allow real qmd startup under load; test the bound separately.
+    fixture = mkFixture "user" 120;
+    localFixture = mkFixture "local" 120;
+    hungFixture = mkFixture "user" 3;
     p = fixture.agenticProbe;
 
     # A consumer without collections opts out: no server, no CLI equivalent.
@@ -188,8 +191,8 @@
           }) ["user" "local"])}
         # A stuck process is bounded and still succeeds with one warning.
         started=$SECONDS
-        ${fixture.packages.${system}.fixture-hung-refresh} >refresh.out 2>refresh.err
-        test "$((SECONDS - started))" -lt 20
+        ${hungFixture.packages.${system}.fixture-hung-refresh} >refresh.out 2>refresh.err
+        test "$((SECONDS - started))" -lt 10
         test ! -s refresh.out
         test "$(wc -l < refresh.err)" -eq 1
         grep -q 'qmd index refresh skipped or failed' refresh.err

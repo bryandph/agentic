@@ -879,7 +879,8 @@ qmd text/BM25 index (project `.qmd/` for `index = "local"`, otherwise the user i
 without network access, model downloads, or embedding; an unchanged content fingerprint
 skips qmd startup entirely. Refresh is best-effort with a
 10-second timeout; errors, timeouts, or configured qmd update hooks produce one warning
-and do not prevent shell entry.
+and do not prevent shell entry. Set `agentic.knowledgeSearch.refreshTimeout` to a positive
+integer number of seconds to adjust the bound.
 
 ### Serena runtime files
 
