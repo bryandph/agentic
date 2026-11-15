@@ -9,7 +9,7 @@ import shutil
 import sys
 import tempfile
 
-good, bad, skipped = sys.argv[1:]
+good, bad, skipped, no_hooks = sys.argv[1:]
 # macOS /tmp is /private/tmp; compare Herdr's canonical checkout paths.
 root = Path(tempfile.mkdtemp()).resolve()
 os.environ.update(HOME=str(root / "home"), GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null")
@@ -122,7 +122,7 @@ def fixture(name, *, hook=good, agent="done", main=False, sub=False, dirty=None,
         assert data["teardown"]["status"] == "not-run", data
         assert [call for call in calls if call[:2] == ["agent", "list"]] == [["agent", "list"]], calls
     removals = [call for call in calls if call[:2] == ["worktree", "remove"]]
-    success = hook == good and agent == "done" and not (main or dirty or mismatch or refuse)
+    success = hook in (good, no_hooks) and agent == "done" and not (main or dirty or mismatch or refuse)
     assert data["status"] == ("removed" if success else "refused"), data
     assert ("workbench-serena-ignore" in data["reason"]) == (dirty == "serena"), data
     if dirty in ("serena", "mixed-serena"):
@@ -136,6 +136,13 @@ def fixture(name, *, hook=good, agent="done", main=False, sub=False, dirty=None,
         assert json.loads(lease_path.read_text())['attached'] == []
         assert not path.exists()
         assert git(repo, "branch", "--list", "worker") == "worker"
+        assert data["teardown"]["status"] == "passed", data
+    if success and hook == no_hooks:
+        assert data["teardown"]["verified"] == [], data
+        assert data["teardown"]["stdout"].splitlines() == [
+            f"worktree {path}: no teardown hooks declared; nothing to verify",
+        ], data
+    elif success:
         assert data["teardown"]["verified"] == ["verified: resources absent"]
         assert data["teardown"]["stdout"].splitlines() == [
             "optional[optional-cleanup]: optional cleanup failed",
@@ -146,7 +153,7 @@ def fixture(name, *, hook=good, agent="done", main=False, sub=False, dirty=None,
             "verified: resources absent",
         ], data
         assert data["teardown"]["status"] == "passed", data
-    else:
+    if not success:
         assert path.is_dir()
         if dirty == "tracked":
             assert (path / "tracked").read_text() == "keep tracked edits\n"
@@ -165,6 +172,12 @@ try:
     fixture("clean-verified", explicit=False)
     fixture("teardown-exit", hook=bad)
     fixture("teardown-skipped", hook=skipped)
+    # Keywords in the worktree path are not cleanup results or proof. The
+    # mixed-case name exercises the case-insensitive skipped scan as well.
+    fixture("path-SkIpPeD-verified:-no-hooks", hook=no_hooks)
+    fixture("path-skipped-verified:-with-hooks")
+    fixture("path-skipped-required-output", hook=skipped)
+    fixture("path-skipped-teardown-exit", hook=bad)
     fixture("dirty-tracked", dirty="tracked")
     fixture("untracked", dirty="untracked")
     fixture("serena-only", dirty="serena")
