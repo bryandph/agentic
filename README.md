@@ -821,6 +821,13 @@ lifecycle policy.
 
 ### Serena memory namespaces
 
+The generated `.serena/memories/knowledge/` namespace is a derived view. Consumers
+git-ignore it rather than commit it; shell entry re-creates it. CI that runs
+`agentic.memoryPlane.lib.checkScript pkgs` (`serena memories check`) must first
+place the namespace with `agentic.memoryPlane.lib.placeScript pkgs`, as
+`modules/checks/memory-plane.nix` does, because a clean checkout no longer
+contains it.
+
 Serena's `knowledge/` memories remain generated and read-only. Agent-written
 memories belong in other topic subdirectories. To enforce that convention in a
 consumer importing core's flake-parts module:
