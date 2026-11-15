@@ -224,6 +224,11 @@
           default = null;
           description = "Model override handed to the connector; null preserves harness model selection.";
         };
+        capabilities = lib.mkOption {
+          type = lib.types.listOf (lib.types.enum ["spawn" "run"]);
+          default = [];
+          description = "Declared Cotal control-plane capabilities, without duplicates. `spawn` mints the control subject for spawning, stopping own children, and persona definition; `run` mints workflow-run commands together with the spawn set. Empty renders no capabilities key.";
+        };
         tags = lib.mkOption {
           type = lib.types.listOf lib.types.str;
           default = [];
@@ -267,6 +272,8 @@
       lib.assertMsg (duplicates agent.authority.${list} == [])
       "agentic.agents.${name}: authority.${list} has duplicate classes: ${lib.concatStringsSep ", " (duplicates agent.authority.${list})}")
     ["autonomous" "decision"];
+    assert lib.assertMsg (duplicates agent.cotal.capabilities == [])
+    "agentic.agents.${name}: cotal.capabilities has duplicates: ${lib.concatStringsSep ", " (duplicates agent.cotal.capabilities)}";
     assert lib.all (target:
       lib.assertMsg (builtins.hasAttr target cfg.agents)
       "agentic.agents.${name}: scope.delegateTo names unknown agent '${target}'")
@@ -452,7 +459,7 @@
       ${lib.optionalString (c.agent != null) "agent: ${builtins.toJSON c.agent}\n"}${lib.optionalString (c.model != null) "model: ${builtins.toJSON c.model}\n"}subscribe: ${builtins.toJSON c.subscribe}
       allowSubscribe: ${builtins.toJSON c.allowSubscribe}
       allowPublish: ${builtins.toJSON c.allowPublish}
-      ---
+      ${lib.optionalString (c.capabilities != []) "capabilities: ${builtins.toJSON c.capabilities}\n"}---
 
       ${cotalBody name agent}'';
 
