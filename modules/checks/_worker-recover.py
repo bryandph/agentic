@@ -1,8 +1,9 @@
-"""Disposable integration fixtures. Every external process is a PATH fake."""
+"""Disposable fixtures: external PATH fakes and one baked sibling outside PATH."""
 import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import tempfile
 import time
@@ -47,7 +48,8 @@ with tempfile.TemporaryDirectory() as temp:
     bin = temp / 'bin'
     bin.mkdir()
     for name in ('cotal', 'herdr', 'ps', 'git', 'lsof', 'workbench-worker-start'):
-        file = bin / name
+        # The sibling lives outside PATH; only its store wrapper can find it.
+        file = (temp if name == 'workbench-worker-start' else bin) / name
         file.write_text(FAKE)
         file.chmod(0o755)
     worktree = temp / 'worktree'
@@ -59,7 +61,9 @@ with tempfile.TemporaryDirectory() as temp:
     config = temp / 'config.json'
     argv = temp / 'argv.json'
     env = {**os.environ, 'PATH': str(bin)+os.pathsep+os.environ['PATH'], 'XDG_STATE_HOME': str(temp / 'state'),
-           'FIXTURE': str(config), 'ARGV': str(argv), 'COTAL_SPACE': 'fixture', 'AGENTIC_COTAL_ADMIN_CREDS': str(temp/'absent'), 'AGENTIC_COTAL_SERVER': ''}
+           'FIXTURE': str(config), 'START_FIXTURE': str(temp / 'workbench-worker-start'), 'ARGV': str(argv), 'COTAL_SPACE': 'fixture', 'AGENTIC_COTAL_ADMIN_CREDS': str(temp/'absent'), 'AGENTIC_COTAL_SERVER': ''}
+    env['AGENTIC_WORKER_START'] = '/nonexistent/inherited-start'
+    assert shutil.which('workbench-worker-start', path=env['PATH']) is None
     snapshot_file = temp / 'state/cotal-seat/fixture/worker.json'
     snapshot_file.parent.mkdir(parents=True)
     def setup(kind='dead'):
@@ -115,6 +119,7 @@ with tempfile.TemporaryDirectory() as temp:
     setup(); row=call('--action','resume','--assignment',str(assignment))
     expected=['--pane','w1:p1','--worktree',str(worktree),'--','pi-worker','--name','worker-r1','--cwd',str(worktree),'--space','fixture','--resume',str(session)]
     assert json.loads(argv.read_text())==expected
+    assert os.path.isabs(row['launcherArgv'][0])
     assert row['attempt']['piSession']=='/new-session.jsonl'
     assert 'resumed as a fork of' in row['followUpDM']
     assert session.read_text()=='history untouched\n'

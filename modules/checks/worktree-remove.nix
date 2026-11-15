@@ -30,9 +30,8 @@
       } ''
         python3 ${./_worktree-remove.py} \
           ${good.removeScript pkgs}/bin/workbench-worktree-remove \
-          ${good.teardownScript pkgs}/bin/workbench-worktree-teardown \
-          ${bad.teardownScript pkgs}/bin/workbench-worktree-teardown \
-          ${skipped.teardownScript pkgs}/bin/workbench-worktree-teardown > "$out"
+          ${bad.removeScript pkgs}/bin/workbench-worktree-remove \
+          ${skipped.removeScript pkgs}/bin/workbench-worktree-remove > "$out"
       '';
   };
 }
