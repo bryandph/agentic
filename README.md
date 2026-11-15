@@ -40,6 +40,11 @@ stdlib-only CLIs ship in consumer and contributor shells. Checks require explici
 [outcome contract](docs/outcome-contract.md) for the schema, examples, exit codes,
 and Cotal ask shorthand.
 
+`workbench-decide` turns decision outcomes into bound checkpoint prompts, lists
+open decisions, and verifies scoped, single-use answers. It ships in the same
+package and shells. The fake adapter is offline; the isolated Cotal adapter is
+**UNVERIFIED** and requires explicit opt-in. See [decision queue](docs/decision-queue.md).
+
 ## Host attention watcher (opt-in)
 
 `agentic-attention-watch` is a Python daemon, not an agent. It runs on one
