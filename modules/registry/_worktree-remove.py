@@ -129,8 +129,10 @@ def remove():
         "verified": [line for line in output.splitlines() if line.startswith("verified:")],
     }
     # The repository runner validates each hook, including absent proof. Also
-    # reject skipped output defensively even if a substituted runner exits zero.
-    if result.returncode or "skipped" in output.lower():
+    # reject skipped output defensively even if a substituted runner exits zero,
+    # except for the runner's explicitly prefixed non-required hook output.
+    if result.returncode or any("skipped" in line.lower() for line in output.splitlines()
+                                if not line.startswith("optional[")):
         record["teardown"]["status"] = "failed"
         raise Refusal("teardown did not verify cleanup")
     # Hooks may have changed the checkout; the evidence must still hold now.

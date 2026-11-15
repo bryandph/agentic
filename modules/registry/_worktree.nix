@@ -549,7 +549,15 @@
               trap 'rm -f "$output"' EXIT
               hook_status=0
               env ${hookEnv h} ${lib.getExe (hook pkgs "teardown" i h.run)} >"$output" || hook_status=$?
-              cat "$output"
+              ${
+                if h.required
+                then ''cat "$output"''
+                else ''
+                  while IFS= read -r line || [ -n "$line" ]; do
+                    printf '%s%s\n' ${lib.escapeShellArg "optional[${h.name}]: "} "$line"
+                  done < "$output"
+                ''
+              }
               reason=""
               if [ "$hook_status" != 0 ]; then reason="exit $hook_status"
               elif ${lib.boolToString h.required} && grep -qi 'skipped' "$output"; then reason='reported skipped cleanup'

@@ -234,10 +234,15 @@ Run the consumer's teardown before deleting its checkout or runner resources.
 Required hooks must exit zero, print a stdout line starting `verified:`, and
 not print `skipped` anywhere on stdout (case-insensitive). A required failure
 vetoes removal. Non-required hooks need no verification line and report nonzero
-exits without stopping standalone teardown. With no hooks, teardown succeeds
-with a note. Only after hooks pass does it detach from all repository leases;
-it never stops services or removes the checkout itself.
-(`modules/registry/_worktree.nix:533-575`.)
+exits without stopping standalone teardown. Every stdout line from a
+non-required hook is prefixed `optional[<name>]: `, including any `verified:`
+line. Removal retains that output but ignores lines starting `optional[` in its
+defensive `skipped` scan and collects only unprefixed `verified:` lines as proof.
+Required hook output stays unprefixed; a nonzero teardown exit still vetoes
+removal regardless of output. With no hooks, teardown succeeds with a note.
+Only after hooks pass does it detach from all repository leases; it never
+stops services or removes the checkout itself.
+(`modules/registry/_worktree.nix:533-583`.)
 
 Current remove is a Herdr-specific fail-closed barrier: verify workspace/path
 agreement against Herdr and Git, establish linked membership in the expected
@@ -271,12 +276,6 @@ state. (Safety boundary: `modules/registry/_worktree-remove.py:98-153`.)
   `copyFiles` and `secretDotfiles` in the main-checkout copy loop. A future
   runner must resolve secret-backend delivery before reusing that step across
   a trust boundary. (`modules/registry/_worktree.nix:411-428`.)
-- **Optional teardown `skipped` output has inconsistent removal behavior.**
-  Standalone teardown permits it for non-required hooks, but remove rejects
-  any teardown stdout containing `skipped`, even if teardown exits zero. Such
-  output can therefore veto removal despite `required = false`.
-  (`modules/registry/_worktree.nix:555-565`;
-  `modules/registry/_worktree-remove.py:132-136`.)
 - **Worker service env is evidence, not automatic injection.** Dependent hooks
   receive env and the setup record retains it; worker-start does not load that
   env into its launcher argv. A future runner must arrange worker consumption

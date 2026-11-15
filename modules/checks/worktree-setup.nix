@@ -419,6 +419,8 @@
         expect_code 5 ${namedDegraded.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --check --json "$TMPDIR/one"
         jq -e '.status == "degraded" and .code == 5' "$TMPDIR/stdout"
         expect_code 0 ${optionalTeardown.worktreeLib.teardownScript pkgs}/bin/workbench-worktree-teardown --worktree "$TMPDIR/one"
+        grep -Fx 'optional[no-proof-needed]: skipped: optional' "$TMPDIR/stdout"
+        grep -Fx 'verified: absent' "$TMPDIR/stdout"
         grep -F 'teardownHooks[optional-cleanup] failed: exit 4; continuing (not required)' "$TMPDIR/stderr"
         test -f one/teardown-later
         expect_code 1 ${namedNoProof.worktreeLib.teardownScript pkgs}/bin/workbench-worktree-teardown --worktree "$TMPDIR/one"

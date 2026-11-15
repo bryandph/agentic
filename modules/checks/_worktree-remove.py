@@ -137,6 +137,15 @@ def fixture(name, *, hook=good, agent="done", main=False, sub=False, dirty=None,
         assert not path.exists()
         assert git(repo, "branch", "--list", "worker") == "worker"
         assert data["teardown"]["verified"] == ["verified: resources absent"]
+        assert data["teardown"]["stdout"].splitlines() == [
+            "optional[optional-cleanup]: optional cleanup failed",
+            "optional[optional-skipped]: skipped: optional resources unavailable",
+            "optional[optional-skipped]: verified: optional proof is not required proof",
+            "optional[optional-skipped]: ",
+            "optional[optional-skipped]: SKIPPED: no trailing newline",
+            "verified: resources absent",
+        ], data
+        assert data["teardown"]["status"] == "passed", data
     else:
         assert path.is_dir()
         if dirty == "tracked":

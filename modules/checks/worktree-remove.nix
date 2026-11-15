@@ -27,6 +27,15 @@
         required = false;
       }
       {
+        name = "optional-skipped";
+        run = ''
+          echo 'skipped: optional resources unavailable'
+          echo 'verified: optional proof is not required proof'
+          printf '\nSKIPPED: no trailing newline'
+        '';
+        required = false;
+      }
+      {
         name = "required-cleanup";
         run = "echo verified: resources absent";
       }
