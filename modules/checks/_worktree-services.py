@@ -90,13 +90,17 @@ while True:
         step = next(s for s in r['steps'] if s['name']=='services[database]')
         assert step['attach'] and step['owner']=='external' and not leases()
         assert len([s for s in r['steps'] if s['name']=='services[database]']) == 1
-        assert r['services']['database']['env']['DATABASE_URL']=='postgresql://localhost/fixture'
+        assert r['services']['database'] == {
+            'env': {'DATABASE_URL': 'postgresql://localhost/fixture'}, 'exportToWorker': True}
+        attached = execute(attach_setup)
+        assert attached['services']['database']['exportToWorker'] is False
         assert (tree/'hook-env').read_text()=='postgresql://localhost/fixture'
         call(services, '--worktree', str(tree), 'stop', 'database', expected=1)
         p.terminate(); p.wait()
         port()
         r=execute(attach_setup, 6)
         assert r['blocker']['code']=='service-unavailable' and not r['blocker']['startAttempted']
+        assert r['services']['database']['exportToWorker'] is False
         env['TEST_NO_WORKSPACE']='1'
         missing=execute(expected=6)['blocker']
         assert missing['code']=='service-workspace-missing'

@@ -40,7 +40,8 @@ runner file. Its inputs are:
   (`modules/registry/_worktree.nix:9-62,480-515,677-688`.)
 - `services`: repository-shared declarations with exactly one `probe.tcp` or
   `probe.run`, optional `start`, `process` (default service name), `autostart`
-  (default true), `startTimeout` (default 60 seconds), and non-secret `env`.
+  (default true), `startTimeout` (default 60 seconds), connection-only `env`,
+  and opt-in `exportToWorker` (bool, default false). Env must never hold credentials.
   (`modules/registry/_worktree.nix:633-676`.)
 
 Render the consumer's `agentic.worktreeLib` builders with its `pkgs`:
@@ -80,7 +81,7 @@ record with the checkout. Record v2 has:
 - overall `status: "ok"|"degraded"|"blocked"|"failed"`, `failedStep`,
   `warmUp: {status, exitCode}`, UTC `startedAt`/`finishedAt`, and `setupCommand`;
 - `submodules: {configured, initialized, excluded, skipped}`,
-  `fsmonitor.staleSocketRemoved`, `services.<name>.env`, and an optional `blocker`.
+  `fsmonitor.staleSocketRemoved`, `services.<name>.{env,exportToWorker}`, and an optional `blocker`.
 
 Degraded means non-required failures only; a required failure stops setup.
 The record identifies the rendered setup executable, not just a protocol version.
@@ -125,8 +126,9 @@ Invalid arguments exit 64. (`modules/registry/_worktree.nix:101-137,139-141`.)
 
 Today setup ensures each service immediately before its first dependent setup
 hook. Dependent hooks receive declared `env`; setup records the same connection
-values for workers. Teardown receives that env without ensuring or starting the
-service. These are public Nix store and record values: never credentials.
+values beside `exportToWorker` for each ensured service. Teardown receives that
+env without ensuring or starting the service. Env is connection data only, stored
+in public Nix store and record values: it must never hold credentials.
 (`modules/registry/_worktree.nix:86-94,480-508,551,671-675,688`.)
 
 A TCP probe connects to the declared host and port with a one-second timeout.
@@ -190,6 +192,16 @@ exactly and be 64 lowercase hexadecimal characters. Failed and blocked are
 never overridable. An ok record needs no override; a supplied override is
 recorded as unused. (`modules/registry/_worker-start.py:72-98`.)
 
+After this gate, runners must honour `services.<name>.exportToWorker` from the
+checked record: only true opts in to merging that service's `env` into the
+worker launcher's inherited environment. Missing/false exports nothing. Use the
+record returned by the check, so degraded acceptance and env refer to the same
+snapshot. Refuse launch (`launch-failed`) for names outside
+`[A-Za-z_][A-Za-z0-9_]*` or duplicate names with different values; equal duplicate
+values are allowed. Worker-start transports argv and env in its hex-JSON
+trampoline and calls `subprocess.call(argv, env=…)` with the inherited environment
+plus service env, without shell interpolation. Blocked/failed setup never launches.
+
 The current Herdr command also checks prompt-file readability relative to the
 target checkout, refuses a pane with an agent, verifies an available foreground
 shell and exact checkout cwd, and launches the argv once without shell
@@ -202,7 +214,8 @@ acceptance. (`modules/registry/_worker-start.py:1,99-184`.)
 
 Worker-start emits one JSON record with `status`, `pane`, `workspace`,
 `worktree`, `agent`, native `session`, `agentStatus`, `evidence`, `reason`,
-`fallback_reason`, `visible_blocker`, `diagnostics`, `ts`, and optional
+`fallback_reason`, `visible_blocker`, `diagnostics`, `exportedEnv` (sorted names
+only, never values), `ts`, and optional
 `setupOverride: {digest, reason, status}` (`degraded` or `unused`). Evidence and
 diagnostics are ANSI-stripped, bounded to 40 lines, 240 characters per line and
 4,096 UTF-8 bytes, with repeated-character compression. Exit codes are 0
@@ -265,6 +278,13 @@ state. (Safety boundary: `modules/registry/_worktree-remove.py:98-153`.)
 
 ## Known gaps
 
+Resolved: **worker service env injection** is now explicit and opt-in through
+`exportToWorker`. Worker-start consumes the checked record and exports connection
+env to its launcher; all future runners must honour the same flag and validation
+rules described above.
+
+Remaining gaps:
+
 - **No OpenShell or pod runner yet (BPH-66 payload).** The service starter,
   worker launcher and removal barrier call Herdr directly; the shared
   declaration and image packaging are not a transport adapter. No sandbox
@@ -276,12 +296,6 @@ state. (Safety boundary: `modules/registry/_worktree-remove.py:98-153`.)
   `copyFiles` and `secretDotfiles` in the main-checkout copy loop. A future
   runner must resolve secret-backend delivery before reusing that step across
   a trust boundary. (`modules/registry/_worktree.nix:411-428`.)
-- **Worker service env is evidence, not automatic injection.** Dependent hooks
-  receive env and the setup record retains it; worker-start does not load that
-  env into its launcher argv. A future runner must arrange worker consumption
-  of the declared connection values explicitly.
-  (`modules/registry/_worktree.nix:491,508`;
-  `modules/registry/_worker-start.py:72-98,133-138`.)
 - **Per-worktree services are not built in Phase 1.** There is no declaration
   for instance scope or per-worktree ports.
   (`modules/registry/_worktree.nix:633-676`.)

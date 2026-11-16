@@ -715,7 +715,7 @@ The coordinator owns this sequence:
 
 `workbench-worker-start` prints one JSON record with `status`, `pane`,
 `workspace`, `worktree`, `agent`, native `session`, `agentStatus`, `evidence`,
-`reason`, `fallback_reason`, `visible_blocker`, `diagnostics` and `ts`. Evidence is an ANSI-stripped pane tail of at
+`reason`, `fallback_reason`, `visible_blocker`, `diagnostics`, `exportedEnv` (names only, never values) and `ts`. Evidence is an ANSI-stripped pane tail of at
 most 40 lines, 240 characters per line and 4,096 UTF-8 bytes total. Runs of
 eight or more identical characters collapse to a short count marker. Diagnostics
 use the same bounds and carry setup errors or Herdr lifecycle facts separately
@@ -876,6 +876,7 @@ workbench.worktree = {
     autostart = true; # false: attach-only
     startTimeout = 60; # seconds
     env.PGHOST = "127.0.0.1";
+    exportToWorker = true; # opt-in; default false
   };
   setupHooks = [{ name = "migrate"; run = "run-migrations"; needs = ["database"]; }];
 };
@@ -908,9 +909,17 @@ records service, owner (`COTAL_NAME`, otherwise `user:<login>`), startedFor,
 workspace, tab, pane, command, startedAt and attached worktrees. A repository lock
 serializes start, attach, detach and stop. Attaching to an owned service adds the
 worktree once. Setup step entries include `attach`, `owner` and optional lease
-path; the record's `services.<name>.env` contains connection values for workers.
-Every hook needing a service receives its env. **Never put credentials in env**:
-these values are public Nix store data and recorded in setup results.
+path; the record stores `services.<name>.env` beside `exportToWorker`.
+Every hook needing a service receives its env. `env` is connection data only:
+**never put credentials in env**, because these values are public Nix store data
+and recorded in setup results. `exportToWorker` is opt-in (default false).
+After the setup check passes (ok, or degraded with an accepted digest),
+worker-start merges env from opted-in services in that checked record into the
+launcher's inherited environment. It uses the hex-JSON trampoline, not shell
+interpolation. Invalid variable names (must match `[A-Za-z_][A-Za-z0-9_]*`) or
+different values for the same exported name refuse launch with `launch-failed`.
+Equal duplicate values are allowed. The launch record lists only sorted names
+in `exportedEnv`, never values. Other runners must honour the same flag.
 
 `workbench-services [--worktree <path>] status [<name>]` prints leases and live
 probes as JSON, including `paneExists` for each lease (true/false for a live or

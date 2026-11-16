@@ -488,7 +488,7 @@
                   )"
                   step_extra="$(jq -c 'del(.blocker)' <<< "$service_result")"
                   service_results="$(jq -c --arg name ${lib.escapeShellArg name} --argjson value "$service_result" '. + {($name): $value}' <<< "$service_results")"
-                  service_env="$(jq -c --arg name ${lib.escapeShellArg name} --argjson env ${lib.escapeShellArg (builtins.toJSON cfg.services.${name}.env)} '. + {($name): {env: $env}}' <<< "$service_env")"
+                  service_env="$(jq -c --arg name ${lib.escapeShellArg name} --argjson env ${lib.escapeShellArg (builtins.toJSON cfg.services.${name}.env)} --argjson exportToWorker ${lib.boolToString cfg.services.${name}.exportToWorker} '. + {($name): {env: $env, exportToWorker: $exportToWorker}}' <<< "$service_env")"
                   if jq -e '.blocker != null' <<< "$service_result" >/dev/null; then
                     blocker="$(jq -c .blocker <<< "$service_result")"
                     end_step blocked 6 true ""
@@ -671,7 +671,12 @@ in {
           env = lib.mkOption {
             type = lib.types.attrsOf lib.types.str;
             default = {};
-            description = "Non-secret connection values exported to dependent hooks and recorded for workers. Never put credentials here.";
+            description = "Connection data only, exported to dependent hooks and recorded for workers. Never put credentials here.";
+          };
+          exportToWorker = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Opt in to exporting this service's connection env to the worker launcher. Runners must honour this flag.";
           };
         };
       }));
