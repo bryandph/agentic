@@ -22,6 +22,7 @@
           start = ''python3 "$TEST_LISTENER" "$TEST_PORT"'';
           startTimeout = 2;
           env.DATABASE_URL = "postgresql://localhost/fixture";
+          exportToWorker = true;
         };
         setupHooks = [
           {
@@ -41,6 +42,7 @@
     attachOnly = fixture {
       imports = [common];
       agentic.worktree.services.database.autostart = false;
+      agentic.worktree.services.database.exportToWorker = lib.mkForce false;
     };
     invalidProbe = probe:
       !(builtins.tryEval (builtins.deepSeq
@@ -55,7 +57,9 @@
         run = "true";
       }
       && normal.declarations.database.process == "database"
-      && normal.declarations.database.autostart;
+      && normal.declarations.database.autostart
+      && normal.declarations.database.exportToWorker
+      && !(fixture {agentic.worktree.services.database.probe.run = "true";}).declarations.database.exportToWorker;
   in {
     checks.worktree-services = assert schemaChecks;
       pkgs.runCommand "worktree-services" {

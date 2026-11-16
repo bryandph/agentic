@@ -43,6 +43,7 @@ def main():
     diagnostics = []
     explanation = {}
     setup_override = None
+    exported_env = {}
 
     def run(command, timeout=5):
         try:
@@ -68,6 +69,7 @@ def main():
                       reason=reason, fallback_reason=explanation.get("fallback_reason"),
                       visible_blocker=explanation.get("visible_blocker"),
                       diagnostics=tail("\n".join(diagnostics)),
+                      exportedEnv=sorted(exported_env),
                       ts=datetime.datetime.now(datetime.timezone.utc).isoformat())
         if setup_override is not None:
             record["setupOverride"] = setup_override
@@ -75,26 +77,56 @@ def main():
         return {"started": 0, "blocked": 10, "not-started": 11, "launch-failed": 20, "setup-failed": 30, "setup-degraded": 31, "setup-blocked": 32}[status]
 
     code, out, err = run([os.environ["AGENTIC_WORKTREE_SETUP"], "--check", "--json", worktree], timeout=30)
+    try:
+        check = json.loads(out)
+    except ValueError:
+        check = {}
+    if not isinstance(check, dict):
+        check = {}
     if code == 6:
-        diagnostics.append(out + err)
+        # --json includes service values; retain stderr, never echo the record.
+        diagnostics.append(err)
         return finish("setup-blocked", "worktree setup blocked; --accept-setup cannot override blocked setup")
     if code == 5:
         diagnostics.append(err)
-        try:
-            check = json.loads(out)
-        except ValueError:
-            check = {}
-        digest = check.get("digest") if isinstance(check, dict) else None
+        digest = check.get("digest")
         if not args.accept_setup or not args.reason or not args.reason.strip():
             return finish("setup-degraded", "degraded setup requires --accept-setup <digest> and a non-empty --reason")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest) or args.accept_setup != digest:
             return finish("setup-degraded", "setup digest mismatch: accepted " + args.accept_setup + "; current " + str(digest))
         setup_override = dict(digest=digest, reason=args.reason, status="degraded")
     elif code:
-        diagnostics.append(out + err)
+        diagnostics.append(err)
         return finish("setup-failed", "worktree setup check failed")
     elif args.accept_setup:
         setup_override = dict(digest=args.accept_setup, reason=args.reason, status="unused")
+    # Use the snapshot returned by --check, not a second file read that could
+    # differ from the record whose setup command and digest were just checked.
+    try:
+        services = check["record"].get("services", {})
+        if not isinstance(services, dict):
+            raise ValueError("invalid setup service declarations")
+        pending_env = {}
+        for service in services.values():
+            if not isinstance(service, dict):
+                raise ValueError("invalid setup service declaration")
+            if service.get("exportToWorker", False) is not True:
+                continue
+            connection_env = service.get("env", {})
+            if not isinstance(connection_env, dict):
+                raise ValueError("invalid exported service env")
+            for name, value in connection_env.items():
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                    raise ValueError("invalid exported service env variable name: " + repr(name))
+                if not isinstance(value, str) or "\x00" in value:
+                    raise ValueError("invalid exported service env value for " + name)
+                if name in pending_env and pending_env[name] != value:
+                    raise ValueError("conflicting exported service env variable: " + name)
+                pending_env[name] = value
+        exported_env = pending_env
+    except (KeyError, AttributeError, TypeError, ValueError) as error:
+        return finish("launch-failed", str(error))
+
     for index, arg in enumerate(argv):
         if arg == "--prompt-file" or arg.startswith("--prompt-file="):
             path = arg.split("=", 1)[1] if "=" in arg else (argv[index + 1] if index + 1 < len(argv) else "")
@@ -125,14 +157,14 @@ def main():
         return finish("launch-failed", "pane cwd does not match worktree; launch refused")
 
     # A single-quoted Python trampoline is valid in both POSIX shells and Nu.
-    # Hex JSON preserves every argv byte without shell interpolation, including
+    # Hex JSON preserves argv and service env without shell interpolation, including
     # apostrophes, newlines, dollars and leading dashes. No exec: the pane's
     # interactive shell survives failures, retaining their terminal evidence.
-    payload = json.dumps(argv).encode().hex()
-    command = (f"{sys.executable} -c 'import json,shlex,subprocess; "
-               f'argv=json.loads(bytes.fromhex("{payload}")); '
+    payload = json.dumps(dict(argv=argv, env=exported_env)).encode().hex()
+    command = (f"{sys.executable} -c 'import json,os,shlex,subprocess; "
+               f'payload=json.loads(bytes.fromhex("{payload}")); argv=payload["argv"]; '
                'print("workbench-worker-start: launching:", shlex.join(argv), flush=True); '
-               'raise SystemExit(subprocess.call(argv))\'')
+               'raise SystemExit(subprocess.call(argv, env=dict(os.environ, **payload["env"])))\'')
     code, _, message = herdr("pane", "run", args.pane, command)
     if code:
         diagnostics.append(message)

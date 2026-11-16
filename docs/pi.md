@@ -137,10 +137,14 @@ setup does not auto-repair or delete submodule state. See the
 Declare `workbench.worktree.services.<name>` in Nix with `probe` (exactly one of
 `{ tcp = "host:port"; }` or `{ run = "command"; }`), `process` (defaults to the
 service name), `start` (optional command override), `autostart` (default true),
-`startTimeout` (default 60 seconds), and `env` (default `{}`). Env contains only
-non-secret connection values: it is stored in Nix and setup records, so never
-put credentials there. Hooks receive env only for services in their `needs`;
-workers can read `services.<name>.env` from the setup record.
+`startTimeout` (default 60 seconds), `env` (default `{}`), and `exportToWorker`
+(default false). Env is connection data only: it is stored in Nix and setup
+records, so never put credentials there. Hooks receive env only for services in
+their `needs`. Worker-start exports env only from services opting in with
+`exportToWorker = true`, using the checked setup record after ok or accepted
+degraded setup. Invalid variable names or conflicting values for a shared name
+refuse launch. The launch record's `exportedEnv` lists names only, never values.
+Other runners must honour the same opt-in flag.
 
 Services are repository-shared, never worktree-specific. Setup probes first and
 attaches if up. No lease means external ownership, which cannot be stopped. If

@@ -33,13 +33,15 @@ if case in ("setup-missing", "setup-failed"):
     sys.exit(2 if case == "setup-missing" else 1)
 status = os.environ.get("SETUP_STATUS", "ok")
 code = {"ok":0, "degraded":5, "failed":1, "missing":2, "stale":3, "not-applicable":4, "blocked":6}[status]
-print(json.dumps(dict(status=status, code=code, digest="a"*64, record={})))
+print(json.dumps(dict(status=status, code=code, digest="a"*64,
+                      record={"services":json.loads(os.environ.get("SETUP_SERVICES", "{}"))})))
 sys.exit(code)
 ''')
     executable("launcher", '''import os,sys,json
 from pathlib import Path
 root = Path(os.environ["FIXTURE"])
 (root / "argv").write_text(json.dumps(sys.argv[1:]))
+(root / "launcher-env").write_text(json.dumps(dict(os.environ)))
 if os.environ["CASE"] == "exit":
     print("\\n".join("old line " + str(i) for i in range(60)))
     print("\\x1b[31mOption '--prompt' argument is ambiguous\\x1b[0m", file=sys.stderr)
@@ -168,17 +170,22 @@ else: raise AssertionError(a)
             (root / name).unlink(missing_ok=True)
         result = subprocess.run([sys.argv[1], "--pane", "w:p", "--worktree", str(root),
                                  *options, "--", "launcher"],
-                                env=dict(env, CASE="started", SETUP_STATUS=setup_status),
+                                env=dict(env, CASE="started", SETUP_STATUS=setup_status,
+                                         SETUP_SERVICES=json.dumps({"db": {"exportToWorker": True,
+                                                                          "env": {"WORKBENCH_DB": weird}}})),
                                 capture_output=True, text=True)
         assert result.returncode == code, (setup_status, options, result)
         record = json.loads(result.stdout)
         assert record["status"] == status, record
         assert (root / "launched").exists() == (code == 0)
+        assert "spaces " not in result.stdout  # even JSON-escaped values must not leak
         if code == 0:
             expected = (dict(digest="a"*64, reason="reviewed shell failure", status="degraded")
                         if setup_status == "degraded" else
                         dict(digest="a"*64, reason="no longer needed", status="unused"))
             assert record["setupOverride"] == expected, record
+            assert json.loads((root / "launcher-env").read_text())["WORKBENCH_DB"] == weird
+            assert record["exportedEnv"] == ["WORKBENCH_DB"]
         elif setup_status == "blocked":
             assert "cannot override" in record["reason"]
             assert "setupOverride" not in record
@@ -186,6 +193,52 @@ else: raise AssertionError(a)
         elif options and options[1] == "b"*64:
             assert "digest mismatch" in record["reason"]
         print("override", setup_status, options, "ok")
+
+    # Connection env is opt-in, merged only in the launcher and never rendered
+    # into shell source or the result record. Equal duplicates are harmless.
+    for services, names, reason in [
+        ({"db": {"exportToWorker": True, "env": {"WORKBENCH_DB": weird}},
+          "cache": {"exportToWorker": False, "env": {"WORKBENCH_CACHE": "not exported"}},
+          "legacy": {"env": {"WORKBENCH_LEGACY": "not exported"}}}, ["WORKBENCH_DB"], None),
+        ({"db": {"exportToWorker": False, "env": {"bad-name": "ignored"}}}, [], None),
+        ({"a": {"exportToWorker": True, "env": {"WORKBENCH_DB": weird}},
+          "b": {"exportToWorker": True, "env": {"WORKBENCH_DB": weird,
+                                                     "WORKBENCH_CACHE": "cache-value"}}},
+         ["WORKBENCH_CACHE", "WORKBENCH_DB"], None),
+        *[({"db": {"exportToWorker": True, "env": {name: "invalid-value"}}}, [],
+           "invalid exported service env variable name")
+          for name in ("bad-name", "1BAD", "", "A=B", "UNICODE_é", "NEWLINE\n")],
+        ({"a": {"exportToWorker": True, "env": {"WORKBENCH_DB": "first-value"}},
+          "b": {"exportToWorker": True, "env": {"WORKBENCH_DB": "other-value"}}}, [],
+         "conflicting exported service env variable"),
+    ]:
+        for name in ("launched", "tail", "calls", "argv", "launcher-env"):
+            (root / name).unlink(missing_ok=True)
+        result = subprocess.run([sys.argv[1], "--pane", "w:p", "--worktree", str(root),
+                                 "--", "launcher"],
+                                env=dict(env, CASE="started", SETUP_SERVICES=json.dumps(services)),
+                                capture_output=True, text=True)
+        record = json.loads(result.stdout)
+        assert result.returncode == (20 if reason else 0), result
+        assert record["exportedEnv"] == names, record
+        assert record["status"] == ("launch-failed" if reason else "started"), record
+        assert (root / "launched").exists() == (reason is None)
+        if reason:
+            assert reason in record["reason"], record
+            assert not (root / "calls").exists()
+        else:
+            launcher_env = json.loads((root / "launcher-env").read_text())
+            assert launcher_env["FIXTURE"] == str(root)  # inherited environment retained
+            for name in ("WORKBENCH_DB", "WORKBENCH_CACHE", "WORKBENCH_LEGACY"):
+                if name not in names:
+                    assert name not in launcher_env
+            for service in services.values():
+                if service.get("exportToWorker"):
+                    for name, value in service["env"].items():
+                        assert launcher_env[name] == value
+        for value in ("spaces ", "not exported", "first-value", "other-value", "cache-value", "invalid-value"):
+            assert value not in result.stdout
+        print("service env", names, reason, "ok")
 
     # An unavailable setup command must also yield one structured record.
     setup.unlink()
