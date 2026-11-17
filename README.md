@@ -562,9 +562,12 @@ Configure `workbench.worktree` (or `agentic.worktree`):
   when `flake.nix` exists, otherwise none. Explicit kinds are `none`, `flake`
   and `devenv`. Discovery applies only to flake. Warm-up applies to devenv,
   or flake only when `devShells.<current-system>.<attr>` exists; absent shells
-  are not-applicable with a reason. Flake warm-up runs
-  `nix develop .#<attr> --impure -c true`. Discovery/warm-up failures degrade
-  setup and later steps still run unless `required = true`, which stops setup.
+  are not-applicable with a reason. The flake probe uses a Git-based reference,
+  like `nix develop .#<attr>`: dirty tracked files and `inputs.self.submodules`
+  are respected; ignored and untracked worktree state is not copied to the store.
+  Flake warm-up runs `nix develop .#<attr> --impure -c true`. Discovery/warm-up
+  failures degrade setup and later steps still run unless `required = true`,
+  which stops setup.
   The `nix-relativeworktrees` environment blocker always stops setup, regardless
   of `required`. Built-in steps other than shell discovery/warm-up remain required.
 - `traits.submodules`: recursively initialize declared submodules (default false).

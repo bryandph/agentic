@@ -441,8 +441,11 @@
           flake)
             # attrNames evaluates names, not shell derivations. A missing
             # system (or devShells output) is also an absent shell, not failure.
+            # Like nix develop .#..., use the Git fetcher (including dirty tracked
+            # files and inputs.self.submodules), not a path that copies ignored
+            # and untracked state. Pass the ref via the environment, not Nix syntax.
             if system="$(nix eval --impure --raw --expr builtins.currentSystem 2>"$probe_stderr")"; then
-              if attrs="$(nix eval --json --impure --expr "let f = builtins.getFlake (toString ./.); in builtins.attrNames (f.devShells.$system or {})" 2>"$probe_stderr")"; then
+              if attrs="$(WORKBENCH_FLAKE_REF="git+file://$(pwd -P)" nix eval --json --impure --expr "let f = builtins.getFlake (builtins.getEnv \"WORKBENCH_FLAKE_REF\"); in builtins.attrNames (f.devShells.$system or {})" 2>"$probe_stderr")"; then
                 if jq -e --arg attr "$shell_attr" 'index($attr) != null' <<< "$attrs" >/dev/null; then
                   nix develop ".#$shell_attr" --impure -c true >/dev/null 2>"$probe_stderr" || warm_status=$?
                 else
