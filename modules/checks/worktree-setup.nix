@@ -445,6 +445,33 @@
         cp good-flake two/flake.nix
         ${absentShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
         jq -e '.status == "ok" and (.steps[] | select(.name == "warm-up") | .applies == false and (.reason | contains("absent")))' "$(record two)"
+        # BPH-66: run the real probe in a linked worktree, with dirty tracked
+        # files and self.submodules. A path-based getFlake both sees and copies
+        # ignored/untracked state; the Git fetcher must do neither. The private
+        # store lets us assert actual contents even inside the check sandbox.
+        test -f two/.git
+        echo warmup-ignored/ > two/.gitignore
+        git -C two add .gitignore
+        mkdir two/warmup-ignored
+        dd if=/dev/zero of=two/warmup-ignored/bph66-ignored-payload bs=1048576 count=4
+        dd if=/dev/zero of=two/bph66-untracked-payload bs=1048576 count=4
+        cat > two/flake.nix <<'EOF'
+        { inputs.self.submodules = true; outputs = { self }: {
+          devShells.${system} =
+            assert !(builtins.pathExists (self + "/warmup-ignored/bph66-ignored-payload"));
+            assert !(builtins.pathExists (self + "/bph66-untracked-payload"));
+            assert builtins.readFile (self + "/sub/nested/data") == "nested-data\n";
+            { dirty-probe = {}; };
+        }; }
+        EOF
+        ${absentShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        jq -e '.status == "ok" and (.steps[] | select(.name == "warm-up") | .outcome == "not-applicable" and (.reason | contains("absent")))' "$(record two)"
+        test -z "$(find "$TMPDIR/store" -name bph66-ignored-payload -o -name bph66-untracked-payload)"
+        rm -r two/warmup-ignored two/bph66-untracked-payload
+        # Missing current system is also not-applicable.
+        echo '{ outputs = _: { devShells.other-system.default = {}; }; }' > two/flake.nix
+        ${flakeShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
+        jq -e '.status == "ok" and (.steps[] | select(.name == "warm-up") | .outcome == "not-applicable")' "$(record two)"
         # Missing devShells entirely is also not-applicable.
         echo '{ outputs = _: {}; }' > two/flake.nix
         ${flakeShell.worktreeLib.setupScript pkgs}/bin/workbench-worktree-setup --worktree "$TMPDIR/two"
