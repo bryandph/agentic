@@ -32,7 +32,6 @@ in {
         pkgs.git
         pkgs.mani
         self'.packages.agentic-hooks-doctor
-        self'.packages.agentic-attention-watch
         (import ./registry/_outcome/package.nix {inherit pkgs;})
         (own.lib.memoryPlane.ignoreCheckPackage pkgs)
         (own.lib.worktree.setupScript pkgs)
